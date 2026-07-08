@@ -69,6 +69,7 @@ A interface permite encadear os seguintes comandos:
 - `ListarElementos(query_selector)`: Retorna uma lista de atributos e textos dos nós DOM correspondentes.
 - `TirarScreenshot()`: Captura o estado visual atual da tela (salvo no log e acessível via modal).
 - `CondicionalSe(seletor_existe)`: Executa a etapa subsequente somente se o elemento fornecido existir no DOM.
+- `ExecutarJS(script)`: Executa um script JavaScript personalizado (eval) de forma síncrona no contexto da página e registra o retorno no histórico da execução.
 
 ---
 
@@ -162,5 +163,22 @@ Você pode realizar backups ou compartilhar suas automações facilmente:
 Para facilitar a leitura direta por agentes externos e operadores humanos:
 - **Botão Link**: Copia a URL direta da API que retorna a representação JSON crua do objeto (`/api/blocks/<id>` ou `/api/tasks/<id>`), facilitando a extração programática dos passos pelo agente de IA.
 - **Deep-linking Web**: A interface gráfica ainda suporta os parâmetros de URL `?tab=blocks&id=<id>` e `?tab=tasks&id=<id>` para redirecionamento automático de operadores na interface.
+
+### 4. Geração e Download de Arquivos de Saída (Ex: CSV, TXT)
+Para rotinas que extraem dados estruturados (por exemplo, listas de participantes, relatórios financeiros ou estatísticas de páginas):
+- Ao adicionar uma etapa do tipo **Executar Javascript (Eval)**, preencha o campo **"Salvar Saída em Arquivo"** (ex: `participantes.csv`).
+- O retorno síncrono da execução do JS será gravado automaticamente como arquivo sob a pasta persistente `/downloads/`.
+- Após a conclusão da pipeline, o link do arquivo gerado estará disponível no histórico de logs da respectiva etapa para download direto.
+
+### 5. Configurações de Autolimpeza e Manutenção de Disco
+O painel administrativo do AutoRPA inclui a aba **Sistema** para gerenciamento global:
+- **Backup e Restauração**: Permite exportar e importar a base inteira (`db.json`) contendo logs, blocos e pipelines.
+- **Autolimpeza programada**: Você pode definir o número de dias para retenção dos dados. Logs de execuções, screenshots e downloads gerados com idade superior à quantidade de dias parametrizada serão removidos automaticamente uma vez por dia à meia-noite (e a cada reinicialização).
+- **Limpeza Manual**: Permite esvaziar pastas de screenshots, downloads de arquivos e limpar histórico de logs instantaneamente.
+
+### 6. Restrição de Acesso por Senha (Segurança)
+Para proteger o orquestrador em rede exposta, defina `SYSTEM_PASSWORD` no arquivo `.env`.
+- A interface React exibirá uma tela de autenticação por senha.
+- Requisições REST API externas de robôs ou agentes externos devem incluir o cabeçalho HTTP `'x-system-password': 'suasenha'`.
 
 

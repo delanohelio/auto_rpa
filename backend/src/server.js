@@ -28,7 +28,116 @@ if (!fs.existsSync(screenshotsPath)) {
 }
 app.use('/screenshots', express.static(screenshotsPath));
 
+const downloadsPath = path.join(DATA_DIR, 'downloads');
+if (!fs.existsSync(downloadsPath)) {
+  fs.mkdirSync(downloadsPath, { recursive: true });
+}
+app.use('/downloads', express.static(downloadsPath));
+
 // --- REST API ROUTES ---
+
+// Password authentication status & verify routes
+const SYSTEM_PASSWORD = process.env.SYSTEM_PASSWORD;
+
+app.get('/api/auth/status', (req, res) => {
+  res.json({ required: !!SYSTEM_PASSWORD });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const { password } = req.body;
+  if (!SYSTEM_PASSWORD || password === SYSTEM_PASSWORD) {
+    return res.json({ success: true });
+  }
+  res.status(401).json({ error: 'Senha incorreta' });
+});
+
+// Middleware to protect API routes
+app.use((req, res, next) => {
+  if (SYSTEM_PASSWORD && req.path.startsWith('/api/') && !req.path.startsWith('/api/auth/')) {
+    const authHeader = req.headers['x-system-password'];
+    if (authHeader !== SYSTEM_PASSWORD) {
+      return res.status(401).json({ error: 'Acesso não autorizado. Autenticação pendente.' });
+    }
+  }
+  next();
+});
+
+// System settings & database management routes
+app.get('/api/system/settings', (req, res) => {
+  try {
+    res.json(db.getSettings());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/system/settings', (req, res) => {
+  try {
+    const saved = db.saveSettings(req.body);
+    res.json(saved);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/system/db/export', (req, res) => {
+  try {
+    const fullDb = {
+      blocks: db.getBlocks(),
+      tasks: db.getTasks(),
+      schedules: db.getSchedules(),
+      logs: db.getLogs(),
+      settings: db.getSettings()
+    };
+    res.json(fullDb);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/system/db/import', (req, res) => {
+  try {
+    db.importDatabase(req.body);
+    res.json({ success: true, message: 'Banco de dados importado com sucesso!' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/system/clean/:type', (req, res) => {
+  try {
+    const { type } = req.params;
+    if (type === 'logs') {
+      db.clearLogs();
+      cleanFolder(screenshotsPath);
+      cleanFolder(downloadsPath);
+      return res.json({ success: true, message: 'Logs e arquivos limpos!' });
+    } else if (type === 'screenshots') {
+      cleanFolder(screenshotsPath);
+      return res.json({ success: true, message: 'Screenshots limpos!' });
+    } else if (type === 'downloads') {
+      cleanFolder(downloadsPath);
+      return res.json({ success: true, message: 'Downloads limpos!' });
+    }
+    res.status(400).json({ error: 'Tipo de limpeza inválido' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+function cleanFolder(dirPath) {
+  if (fs.existsSync(dirPath)) {
+    const files = fs.readdirSync(dirPath);
+    for (const file of files) {
+      const fullPath = path.join(dirPath, file);
+      try {
+        if (fs.statSync(fullPath).isFile()) {
+          fs.unlinkSync(fullPath);
+        }
+      } catch (_) {}
+    }
+  }
+}
 
 // 1. Blocks API
 app.get('/api/blocks', (req, res) => {
@@ -366,9 +475,9 @@ if (fs.existsSync(frontendDistPath)) {
   console.log(`Production Mode: Serving client assets from ${frontendDistPath}`);
   app.use(express.static(frontendDistPath));
   
-  // Catch-all route to serve the SPA client for deep routes (except API/screenshots)
+  // Catch-all route to serve the SPA client for deep routes (except API/screenshots/downloads)
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/screenshots')) {
+    if (req.path.startsWith('/api') || req.path.startsWith('/screenshots') || req.path.startsWith('/downloads')) {
       return next();
     }
     res.sendFile(path.join(frontendDistPath, 'index.html'));

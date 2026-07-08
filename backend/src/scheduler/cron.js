@@ -114,5 +114,22 @@ export function initScheduler() {
     }
   }
 
+  // Schedule the auto-cleanup check daily at midnight
+  cron.schedule('0 0 * * *', () => {
+    console.log('Running daily auto-cleanup check...');
+    try {
+      db.cleanExpiredLogs();
+    } catch (err) {
+      console.error('Error running daily auto-cleanup check:', err);
+    }
+  });
+
+  // Run cleanup once immediately on startup
+  try {
+    db.cleanExpiredLogs();
+  } catch (err) {
+    console.error('Error running initial auto-cleanup check:', err);
+  }
+
   console.log(`Scheduler initialized. Loaded ${activeJobs.size} active schedules.`);
 }

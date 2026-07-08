@@ -23,12 +23,193 @@ import {
   Sparkles,
   Upload,
   Download,
-  Link
+  Link,
+  Settings,
+  LogOut,
+  Database,
+  ShieldAlert
 } from 'lucide-react';
 
 export default function App() {
   // Navigation State
   const [activeTab, setActiveTab] = useState('dashboard');
+
+  // Auth state variables
+  const [isAuthenticated, setIsAuthenticated] = useState(true);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [authError, setAuthError] = useState('');
+  
+  // System settings state
+  const [settings, setSettings] = useState({ autoCleanEnabled: false, retentionDays: 30 });
+
+  const apiFetch = async (url, options = {}) => {
+    const saved = localStorage.getItem('systemPassword');
+    if (!options.headers) {
+      options.headers = {};
+    }
+    if (saved) {
+      options.headers['x-system-password'] = saved;
+    }
+    if (options.body && !options.headers['Content-Type']) {
+      options.headers['Content-Type'] = 'application/json';
+    }
+    const res = await fetch(url, options);
+    if (res.status === 401) {
+      localStorage.removeItem('systemPassword');
+      setIsAuthenticated(false);
+      throw new Error('Não autorizado');
+    }
+    return res;
+  };
+
+  const checkAuthStatus = async () => {
+    try {
+      const res = await fetch('/api/auth/status').then(r => r.json());
+      setAuthRequired(res.required);
+      if (res.required) {
+        const saved = localStorage.getItem('systemPassword');
+        if (!saved) {
+          setIsAuthenticated(false);
+        } else {
+          const loginRes = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: saved })
+          });
+          if (loginRes.ok) {
+            setIsAuthenticated(true);
+          } else {
+            localStorage.removeItem('systemPassword');
+            setIsAuthenticated(false);
+          }
+        }
+      } else {
+        setIsAuthenticated(true);
+      }
+    } catch (err) {
+      console.error('Failed to check auth status:', err);
+    }
+  };
+
+  const handleLogin = async (e) => {
+    if (e) e.preventDefault();
+    setAuthError('');
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: passwordInput })
+      });
+      if (res.ok) {
+        localStorage.setItem('systemPassword', passwordInput);
+        setIsAuthenticated(true);
+        setPasswordInput('');
+        fetchData();
+      } else {
+        setAuthError('Senha incorreta.');
+      }
+    } catch (err) {
+      setAuthError('Erro de conexão ao autenticar.');
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('systemPassword');
+    setIsAuthenticated(false);
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const res = await apiFetch('/api/system/settings');
+      const val = await res.json();
+      setSettings(val);
+    } catch (e) {
+      console.error('Failed to fetch settings:', e);
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    try {
+      const res = await apiFetch('/api/system/settings', {
+        method: 'POST',
+        body: JSON.stringify(settings)
+      });
+      if (res.ok) {
+        alert('Configurações do sistema salvas com sucesso!');
+      } else {
+        alert('Falha ao salvar configurações.');
+      }
+    } catch (err) {
+      alert('Erro ao salvar: ' + err.message);
+    }
+  };
+
+  const handleExportDB = async () => {
+    try {
+      const res = await apiFetch('/api/system/db/export');
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `autorpa_db_backup_${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Erro ao exportar banco de dados: ' + err.message);
+    }
+  };
+
+  const handleImportDB = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const data = JSON.parse(evt.target.result);
+        if (!window.confirm('Atenção: Isso irá substituir todas as tarefas, blocos, configurações e logs atuais do sistema. Tem certeza que deseja continuar?')) {
+          return;
+        }
+        const res = await apiFetch('/api/system/db/import', {
+          method: 'POST',
+          body: JSON.stringify(data)
+        });
+        if (res.ok) {
+          alert('Banco de dados importado com sucesso!');
+          fetchData();
+        } else {
+          const err = await res.json();
+          alert('Erro ao importar banco de dados: ' + (err.error || 'Erro desconhecido'));
+        }
+      } catch (err) {
+        alert('Arquivo JSON inválido: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleCleanData = async (type) => {
+    const msgs = {
+      logs: 'Isso apagará todo o histórico de execuções, screenshots salvos e arquivos baixados. Deseja continuar?',
+      screenshots: 'Deseja apagar todos os screenshots salvos na pasta do sistema?',
+      downloads: 'Deseja apagar todos os arquivos baixados pelo eval na pasta do sistema?'
+    };
+    if (!window.confirm(msgs[type])) return;
+    try {
+      const res = await apiFetch(`/api/system/clean/${type}`, { method: 'POST' });
+      if (res.ok) {
+        const val = await res.json();
+        alert(val.message);
+        fetchData();
+      } else {
+        alert('Falha ao limpar dados.');
+      }
+    } catch (err) {
+      alert('Erro: ' + err.message);
+    }
+  };
 
   // DB Data States
   const [blocks, setBlocks] = useState([]);
@@ -77,10 +258,10 @@ export default function App() {
     try {
       setLoading(true);
       const [resBlocks, resTasks, resSchedules, resLogs] = await Promise.all([
-        fetch('/api/blocks').then(r => r.json()),
-        fetch('/api/tasks').then(r => r.json()),
-        fetch('/api/schedules').then(r => r.json()),
-        fetch('/api/logs').then(r => r.json())
+        apiFetch('/api/blocks').then(r => r.json()),
+        apiFetch('/api/tasks').then(r => r.json()),
+        apiFetch('/api/schedules').then(r => r.json()),
+        apiFetch('/api/logs').then(r => r.json())
       ]);
       setBlocks(resBlocks);
       setTasks(resTasks);
@@ -89,23 +270,29 @@ export default function App() {
       setError(null);
     } catch (err) {
       console.error('Failed to fetch data:', err);
-      setError('Erro de conexão com a API do servidor.');
+      setError('Erro de conexão com a API do servidor ou não autenticado.');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
+    checkAuthStatus();
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    
     fetchData();
 
     // Set up background polling for running logs/tasks every 2 seconds
     const interval = setInterval(async () => {
       try {
-        const freshLogs = await fetch('/api/logs').then(r => r.json());
+        const freshLogs = await apiFetch('/api/logs').then(r => r.json());
         setLogs(freshLogs);
         
         // Update active schedules info
-        const freshSchedules = await fetch('/api/schedules').then(r => r.json());
+        const freshSchedules = await apiFetch('/api/schedules').then(r => r.json());
         setSchedules(freshSchedules);
 
         // Check if any log is currently "running" and sync running tasks
@@ -128,7 +315,14 @@ export default function App() {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [selectedLog]);
+  }, [isAuthenticated, selectedLog]);
+
+  // Fetch settings on system tab activation
+  useEffect(() => {
+    if (activeTab === 'system' && isAuthenticated) {
+      fetchSettings();
+    }
+  }, [activeTab, isAuthenticated]);
 
   // Deep link routing effect
   useEffect(() => {
@@ -194,7 +388,7 @@ export default function App() {
             parsed.steps = parsed.steps || [];
             parsed.parameters = parsed.parameters || [];
             
-            const response = await fetch('/api/blocks', {
+            const response = await apiFetch('/api/blocks', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(parsed)
@@ -206,7 +400,7 @@ export default function App() {
             parsed.blocks = parsed.blocks || [];
             parsed.blockIds = parsed.blockIds || [];
             
-            const response = await fetch('/api/tasks', {
+            const response = await apiFetch('/api/tasks', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(parsed)
@@ -235,7 +429,7 @@ export default function App() {
   const triggerTaskRun = async (taskId, overrides = {}) => {
     try {
       setRunningTasks(prev => new Set([...prev, taskId]));
-      const response = await fetch(`/api/tasks/${taskId}/run`, {
+      const response = await apiFetch(`/api/tasks/${taskId}/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ parameterOverrides: overrides })
@@ -277,7 +471,7 @@ export default function App() {
     if (!editingBlock.name) return alert('Nome do bloco é obrigatório');
 
     try {
-      const response = await fetch('/api/blocks', {
+      const response = await apiFetch('/api/blocks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editingBlock)
@@ -294,7 +488,7 @@ export default function App() {
   const handleDeleteBlock = async (id) => {
     if (!confirm('Deseja realmente excluir este bloco de ação?')) return;
     try {
-      const response = await fetch(`/api/blocks/${id}`, { method: 'DELETE' });
+      const response = await apiFetch(`/api/blocks/${id}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('Falha ao excluir bloco');
       fetchData();
     } catch (err) {
@@ -309,7 +503,7 @@ export default function App() {
     if (editingTask.blockIds.length === 0) return alert('Selecione pelo menos um Bloco de Ação para a Pipeline');
 
     try {
-      const response = await fetch('/api/tasks', {
+      const response = await apiFetch('/api/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editingTask)
@@ -326,7 +520,7 @@ export default function App() {
   const handleDeleteTask = async (id) => {
     if (!confirm('Deseja realmente excluir esta Tarefa/Pipeline?')) return;
     try {
-      const response = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+      const response = await apiFetch(`/api/tasks/${id}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('Falha ao excluir tarefa');
       fetchData();
     } catch (err) {
@@ -341,7 +535,7 @@ export default function App() {
     if (!newSchedule.cronExpression) return alert('Insira a expressão Cron');
 
     try {
-      const response = await fetch('/api/schedules', {
+      const response = await apiFetch('/api/schedules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newSchedule)
@@ -362,7 +556,7 @@ export default function App() {
   const handleDeleteSchedule = async (id) => {
     if (!confirm('Excluir este agendamento?')) return;
     try {
-      const response = await fetch(`/api/schedules/${id}`, { method: 'DELETE' });
+      const response = await apiFetch(`/api/schedules/${id}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('Falha ao excluir agendamento');
       fetchData();
     } catch (err) {
@@ -372,7 +566,7 @@ export default function App() {
 
   const handleToggleSchedule = async (sched) => {
     try {
-      await fetch('/api/schedules', {
+      await apiFetch('/api/schedules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -390,7 +584,7 @@ export default function App() {
   const handleClearLogs = async () => {
     if (!confirm('Deseja limpar todos os registros e capturas de tela do histórico de execuções?')) return;
     try {
-      const response = await fetch('/api/logs', { method: 'DELETE' });
+      const response = await apiFetch('/api/logs', { method: 'DELETE' });
       if (!response.ok) throw new Error('Falha ao limpar logs');
       fetchData();
     } catch (err) {
@@ -546,6 +740,70 @@ export default function App() {
 
   const stats = getStats();
 
+  if (!isAuthenticated) {
+    return (
+      <div style={{
+        height: '100vh',
+        width: '100vw',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--bg-primary)',
+        color: 'var(--text-primary)'
+      }}>
+        <form onSubmit={handleLogin} className="card" style={{
+          width: '400px',
+          padding: '32px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+          border: '1px solid var(--border-color)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '24px'
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <Sparkles className="text-success" size={48} style={{ marginBottom: '12px' }} />
+            <h2 style={{ fontSize: '24px', fontWeight: '800' }}>Painel AutoRPA</h2>
+            <p className="text-muted" style={{ fontSize: '13px', marginTop: '6px' }}>Autenticação necessária para acessar a orquestração</p>
+          </div>
+
+          {authError && (
+            <div style={{
+              padding: '12px',
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid var(--color-danger)',
+              borderRadius: '6px',
+              color: 'var(--color-danger)',
+              fontSize: '13px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}>
+              <AlertCircle size={16} />
+              <span>{authError}</span>
+            </div>
+          )}
+
+          <div className="form-group" style={{ margin: 0 }}>
+            <label style={{ display: 'block', fontSize: '12px', marginBottom: '8px' }}>Senha do Sistema</label>
+            <input
+              type="password"
+              className="form-control"
+              placeholder="Digite a senha de acesso"
+              value={passwordInput}
+              onChange={e => setPasswordInput(e.target.value)}
+              required
+              autoFocus
+            />
+          </div>
+
+          <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '12px' }}>
+            Acessar Painel
+          </button>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       {/* Sidebar Section */}
@@ -602,12 +860,30 @@ export default function App() {
                 Logs de Execução
               </a>
             </li>
+            <li>
+              <a
+                className={`nav-item ${activeTab === 'system' ? 'active' : ''}`}
+                onClick={() => { setActiveTab('system'); setEditingBlock(null); setEditingTask(null); }}
+              >
+                <Settings size={18} />
+                Sistema
+              </a>
+            </li>
           </ul>
         </nav>
 
         <div className="sidebar-footer">
           <p>Motor: Playwright Headless</p>
           <p style={{ marginTop: '4px' }}>v1.0.0 Stable</p>
+          {authRequired && (
+            <button
+              onClick={handleLogout}
+              className="btn btn-secondary btn-sm"
+              style={{ marginTop: '12px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+            >
+              <LogOut size={14} /> Sair do Painel
+            </button>
+          )}
         </div>
       </aside>
 
@@ -1017,6 +1293,7 @@ export default function App() {
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => addStepToBlock('press_key')}>+ Tecla</button>
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => addStepToBlock('extract_html')}>+ HTML</button>
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => addStepToBlock('list_elements')}>+ Elementos</button>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => addStepToBlock('eval')}>+ Eval JS</button>
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => addStepToBlock('take_screenshot')}>+ Print</button>
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => addStepToBlock('conditional_if')}>+ Condição Se</button>
                         <button type="button" className="btn btn-secondary btn-sm" style={{ borderColor: 'var(--color-secondary)' }} onClick={() => addStepToBlock('agent_control')}>+ Controle do Agente</button>
@@ -1042,6 +1319,7 @@ export default function App() {
                                   {step.type === 'press_key' && 'Apertar Tecla'}
                                   {step.type === 'extract_html' && 'Extrair Código HTML'}
                                   {step.type === 'list_elements' && 'Listar Elementos DOM'}
+                                  {step.type === 'eval' && 'Executar Javascript (Eval)'}
                                   {step.type === 'take_screenshot' && 'Tirar Screenshot'}
                                   {step.type === 'conditional_if' && 'Se Elemento Existe (Condição)'}
                                   {step.type === 'agent_control' && 'Pausar e Ceder Controle ao Agente'}
@@ -1218,6 +1496,33 @@ export default function App() {
                                     Salva um instantâneo (screenshot) de página inteira nos arquivos de logs deste run.
                                   </p>
                                 </div>
+                              )}
+
+                              {step.type === 'eval' && (
+                                <>
+                                  <div style={{ gridColumn: 'span 2' }}>
+                                    <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Script JavaScript a Executar (retorno síncrono avaliado)</label>
+                                    <textarea
+                                      className="form-control"
+                                      rows={4}
+                                      style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                                      placeholder="Ex: (() => { return document.title; })()"
+                                      value={step.script || ''}
+                                      onChange={e => updateStepField(index, 'script', e.target.value)}
+                                      required
+                                    />
+                                  </div>
+                                  <div style={{ gridColumn: 'span 2', marginTop: '12px' }}>
+                                    <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Salvar Saída em Arquivo (Opcional)</label>
+                                    <input
+                                      type="text"
+                                      className="form-control"
+                                      placeholder="Ex: participantes.csv (deixe em branco se não quiser gerar arquivo, aceita {{param:nome}})"
+                                      value={step.output_file || ''}
+                                      onChange={e => updateStepField(index, 'output_file', e.target.value)}
+                                    />
+                                  </div>
+                                </>
                               )}
 
                               {step.type === 'conditional_if' && (
@@ -1837,6 +2142,26 @@ export default function App() {
                           </div>
                         )}
 
+                        {step.downloadPath && (
+                          <div style={{ marginTop: '12px' }}>
+                            <a
+                              href={step.downloadPath}
+                              download={step.downloadName || 'download'}
+                              className="btn btn-primary btn-sm"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                textDecoration: 'none',
+                                padding: '6px 12px',
+                                fontSize: '12px'
+                              }}
+                            >
+                              <Download size={12} /> Baixar Arquivo Gerado ({step.downloadName})
+                            </a>
+                          </div>
+                        )}
+
                         {step.error && (
                           <div style={{ marginTop: '8px', color: 'var(--color-danger)' }}>
                             <strong>Falha:</strong> {step.error}
@@ -1861,6 +2186,111 @@ export default function App() {
                   <p className="text-muted" style={{ fontSize: '13px' }}>Nenhuma etapa registrada ainda para este log.</p>
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ---------------- SYSTEM MANAGEMENT TAB ---------------- */}
+        {activeTab === 'system' && (
+          <div>
+            <div className="header-section">
+              <div>
+                <h2>Gerenciamento do Sistema</h2>
+                <p>Gerencie backups do banco de dados, limpeza de arquivos temporários e políticas de retenção automática</p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+              
+              {/* Autoclean Settings Card */}
+              <div className="card" style={{ padding: '24px' }}>
+                <h3 style={{ fontSize: '18px', display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+                  <Clock size={20} className="text-secondary" /> Limpeza Automática de Dados
+                </h3>
+                <p className="text-muted" style={{ fontSize: '13px', marginBottom: '20px' }}>
+                  Configure o AutoRPA para apagar automaticamente logs antigos, imagens de screenshot e arquivos baixados para evitar consumo desnecessário de armazenamento.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={settings.autoCleanEnabled}
+                      onChange={e => setSettings(prev => ({ ...prev, autoCleanEnabled: e.target.checked }))}
+                      style={{ width: '18px', height: '18px' }}
+                    />
+                    <span>Ativar autolimpeza recorrente (Executada diariamente)</span>
+                  </label>
+
+                  {settings.autoCleanEnabled && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <span style={{ fontSize: '14px' }}>Manter logs e arquivos dos últimos</span>
+                      <input
+                        type="number"
+                        className="form-control"
+                        style={{ width: '90px', padding: '6px 12px' }}
+                        min={1}
+                        value={settings.retentionDays}
+                        onChange={e => setSettings(prev => ({ ...prev, retentionDays: parseInt(e.target.value, 10) || 0 }))}
+                      />
+                      <span style={{ fontSize: '14px' }}>dias</span>
+                    </div>
+                  )}
+
+                  <button className="btn btn-primary" style={{ alignSelf: 'flex-start' }} onClick={handleSaveSettings}>
+                    Salvar Configurações
+                  </button>
+                </div>
+              </div>
+
+              {/* Database Import/Export Card */}
+              <div className="card" style={{ padding: '24px' }}>
+                <h3 style={{ fontSize: '18px', display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+                  <Database size={20} className="text-secondary" /> Backup do Banco de Dados
+                </h3>
+                <p className="text-muted" style={{ fontSize: '13px', marginBottom: '20px' }}>
+                  Exporte todo o conteúdo do sistema (tarefas, blocos de ações, logs e agendamentos) para um único arquivo JSON, ou importe um backup existente.
+                </p>
+
+                <div className="gap-12" style={{ flexWrap: 'wrap' }}>
+                  <button className="btn btn-secondary" onClick={handleExportDB}>
+                    <Download size={14} /> Exportar Banco de Dados
+                  </button>
+                  
+                  <label className="btn btn-secondary" style={{ margin: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    <Upload size={14} /> Importar Banco de Dados
+                    <input
+                      type="file"
+                      accept=".json"
+                      onChange={handleImportDB}
+                      style={{ display: 'none' }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Hard Cleanups Card */}
+              <div className="card" style={{ padding: '24px', borderColor: 'rgba(239, 68, 68, 0.3)' }}>
+                <h3 style={{ fontSize: '18px', display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', color: 'var(--color-danger)' }}>
+                  <ShieldAlert size={20} /> Zona de Limpeza Total
+                </h3>
+                <p className="text-muted" style={{ fontSize: '13px', marginBottom: '20px' }}>
+                  Limpe pastas temporárias e histórico de forma manual imediata. Atenção: estas ações são irreversíveis.
+                </p>
+
+                <div className="gap-12" style={{ flexWrap: 'wrap' }}>
+                  <button className="btn btn-danger" onClick={() => handleCleanData('logs')}>
+                    Limpar Todos os Logs + Arquivos
+                  </button>
+                  <button className="btn btn-secondary" style={{ borderColor: 'var(--color-danger)', color: 'var(--color-danger)' }} onClick={() => handleCleanData('screenshots')}>
+                    Limpar Apenas Screenshots
+                  </button>
+                  <button className="btn btn-secondary" style={{ borderColor: 'var(--color-danger)', color: 'var(--color-danger)' }} onClick={() => handleCleanData('downloads')}>
+                    Limpar Apenas Downloads (CSV/TXT)
+                  </button>
+                </div>
+              </div>
+
             </div>
           </div>
         )}

@@ -17,6 +17,11 @@ if (!fs.existsSync(SCREENSHOTS_DIR)) {
   fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
 }
 
+const DOWNLOADS_DIR = path.join(DATA_DIR, 'downloads');
+if (!fs.existsSync(DOWNLOADS_DIR)) {
+  fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
+}
+
 // Active control sessions map for agent handoff
 export const activeControlSessions = new Map();
 
@@ -373,6 +378,29 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
               await page.screenshot({ path: filePath, fullPage: true });
               
               stepLog.screenshotPath = `/screenshots/${filename}`;
+              break;
+            }
+
+            case 'eval': {
+              const script = resolveText(step.script, decryptedSecrets, mergedParams);
+              if (!script) throw new Error("O script da etapa 'eval' não foi fornecido.");
+              console.log(`Evaluating script: ${script.substring(0, 60)}...`);
+              const output = await page.evaluate(script);
+              stepLog.data = { result: output };
+
+              if (step.output_file) {
+                const resolvedFilename = resolveText(step.output_file, decryptedSecrets, mergedParams);
+                const safeFilename = path.basename(resolvedFilename);
+                const uniqueFilename = `download_${runId}_${safeFilename}`;
+                const filePath = path.join(DOWNLOADS_DIR, uniqueFilename);
+
+                console.log(`Writing eval output to file: ${filePath}`);
+                const fileContent = typeof output === 'string' ? output : JSON.stringify(output, null, 2);
+                fs.writeFileSync(filePath, fileContent, 'utf-8');
+
+                stepLog.downloadPath = `/downloads/${uniqueFilename}`;
+                stepLog.downloadName = safeFilename;
+              }
               break;
             }
 

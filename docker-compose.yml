@@ -5,17 +5,19 @@ services:
       dockerfile: Dockerfile
     container_name: rpa_orchestrator
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:3000"
     volumes:
       # Persist database file, screenshots, and logs
       - rpa_data:/app/backend/data
     environment:
       - PORT=3000
-      - NODE_ENV=production
+      - NODE_ENV=${NODE_ENV:-production}
       # Secret key for encrypting/decrypting sensitive variables (RPA module secrets)
-      - SECRET_KEY=change_this_to_a_secure_random_key_in_production
+      - SECRET_KEY=${SECRET_KEY:-change_this_to_a_secure_random_key_in_production}
       # Run playwright headlessly
-      - HEADLESS=true
+      - HEADLESS=${HEADLESS:-true}
+      # Optional system password access for frontend and REST API
+      - SYSTEM_PASSWORD=${SYSTEM_PASSWORD:-}
     restart: unless-stopped
 
 volumes:

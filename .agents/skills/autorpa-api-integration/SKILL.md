@@ -16,7 +16,7 @@ This skill guide provides developers and AI agents with the technical details, R
 AutoRPA models web automation around three core concepts:
 
 1. **Action Blocks (Blocos de Ação)**:
-   - Reusable modules of automation containing a sequence of browser instructions (steps) such as `navigate`, `click`, `type`, `wait`, `press_key`, `extract_html`, `take_screenshot`, `conditional_if`, and `agent_control`.
+   - Reusable modules of automation containing a sequence of browser instructions (steps) such as `navigate`, `click`, `type`, `wait`, `press_key`, `extract_html`, `eval` (custom page JavaScript execution), `take_screenshot`, `conditional_if`, and `agent_control`.
    - **Parameters**: Blocks can declare dynamic placeholders inside text parameters using the `{{param:name}}` syntax. Each parameter can define a description and a fallback default value.
    - **Secrets**: Sensitive fields (like passwords) are encrypted simetrically using **AES-256-CBC** and decrypted only in-memory right before browser actions. Log outputs mask these secrets dynamically using `●●●●●●`.
 
@@ -82,6 +82,7 @@ The AutoRPA server runs on port `3000`. Below are the endpoint details, payloads
         { "type": "navigate", "url": "https://www.wikipedia.org" },
         { "type": "type", "selector_type": "id", "selector": "searchInput", "text": "{{param:termo_de_busca}}" },
         { "type": "click", "selector_type": "class", "selector": ".pure-button-primary-progressive" },
+        { "type": "eval", "script": "(() => { return document.title; })()", "output_file": "title.txt" },
         { "type": "agent_control", "acquireTimeout": 30, "executionTimeout": 60 },
         { "type": "take_screenshot" }
       ]
@@ -434,4 +435,21 @@ Para facilitar o trabalho e entendimento de agentes externos:
   - **Representação do Bloco**: `http://localhost:3000/api/blocks/<blockId>`
   - **Representação da Pipeline**: `http://localhost:3000/api/tasks/<taskId>`
 - **Navegação Web (Deep-linking)**: A interface web ainda aceita os parâmetros `?tab=blocks&id=<blockId>` e `?tab=tasks&id=<taskId>` para direcionar operadores humanos às respectivas abas e painéis de edição de forma automática.
+
+### 4. Geração de Arquivos de Saída (Download)
+Para etapas do tipo `eval` (Executar JS), você pode preencher o campo opcional `"output_file"`.
+- Se especificado, o retorno do script avaliado será gravado como arquivo em disco na pasta de downloads compartilhada (`/downloads/download_<runId>_<fileName>`).
+- String vazias ou estruturas lógicas de arrays/objetos são serializadas automaticamente.
+- O link para download do arquivo gerado ficará acessível no histórico de logs da respectiva etapa na interface.
+
+### 5. Gerenciamento do Sistema (Aba Sistema)
+A aba **Sistema** na barra lateral permite realizar operações globais de manutenção:
+- **Backup e Restauração**: Permite exportar o banco de dados completo (`db.json`) ou importar backups JSON de forma a substituir o estado de blocos, tarefas, schedules e logs de uma vez.
+- **Autolimpeza por Retenção (Dias)**: Se ativado, limpa logs de execução, capturas de tela (screenshots) e downloads de arquivos antigos gerados que tenham idade maior que a quantidade de dias parametrizada. O script roda automaticamente na inicialização e diariamente à meia-noite.
+- **Limpeza Manual**: Botões de ação imediata e irreversível para deletar logs, screenshots ou arquivos de downloads.
+
+### 6. Autenticação e Senha de Acesso
+Você pode restringir o acesso à interface administrativa do AutoRPA e à API REST definindo a variável de ambiente `SYSTEM_PASSWORD` no arquivo `.env`.
+- Caso configurada, a interface web passará a exigir login por senha na tela de abertura.
+- Scripts e ferramentas externas devem passar a senha nos cabeçalhos HTTP através da chave `x-system-password` em todas as requisições API.
 

@@ -349,5 +349,81 @@ export const db = {
     data.logs = [];
     writeDB(data);
     return true;
+  },
+
+  getSettings() {
+    const data = readDB();
+    if (!data.settings) {
+      data.settings = { autoCleanEnabled: false, retentionDays: 30 };
+    }
+    return data.settings;
+  },
+
+  saveSettings(settings) {
+    const data = readDB();
+    data.settings = {
+      autoCleanEnabled: !!settings.autoCleanEnabled,
+      retentionDays: parseInt(settings.retentionDays, 10) || 30
+    };
+    writeDB(data);
+    return data.settings;
+  },
+
+  importDatabase(newData) {
+    if (!newData || typeof newData !== 'object') throw new Error('Dados inválidos');
+    const validated = {
+      blocks: Array.isArray(newData.blocks) ? newData.blocks : [],
+      tasks: Array.isArray(newData.tasks) ? newData.tasks : [],
+      schedules: Array.isArray(newData.schedules) ? newData.schedules : [],
+      logs: Array.isArray(newData.logs) ? newData.logs : [],
+      settings: newData.settings || { autoCleanEnabled: false, retentionDays: 30 }
+    };
+    writeDB(validated);
+    return true;
+  },
+
+  cleanExpiredLogs() {
+    const data = readDB();
+    if (!data.settings || !data.settings.autoCleanEnabled) {
+      return 0;
+    }
+    const retentionDays = parseInt(data.settings.retentionDays, 10) || 30;
+    const thresholdDate = new Date();
+    thresholdDate.setDate(thresholdDate.getDate() - retentionDays);
+    
+    let deletedCount = 0;
+    const activeLogs = [];
+    
+    for (const log of data.logs) {
+      const logDate = new Date(log.startedAt || log.createdAt);
+      if (logDate < thresholdDate) {
+        deletedCount++;
+        if (log.screenshotPath) {
+          const fullPath = path.join(DATA_DIR, 'screenshots', path.basename(log.screenshotPath));
+          try { if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath); } catch (_) {}
+        }
+        if (log.stepsExecuted) {
+          for (const step of log.stepsExecuted) {
+            if (step.screenshotPath) {
+              const fullPath = path.join(DATA_DIR, 'screenshots', path.basename(step.screenshotPath));
+              try { if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath); } catch (_) {}
+            }
+            if (step.downloadPath) {
+              const fullPath = path.join(DATA_DIR, 'downloads', path.basename(step.downloadPath));
+              try { if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath); } catch (_) {}
+            }
+          }
+        }
+      } else {
+        activeLogs.push(log);
+      }
+    }
+    
+    if (deletedCount > 0) {
+      data.logs = activeLogs;
+      writeDB(data);
+      console.log(`Auto-cleanup: deleted ${deletedCount} logs older than ${retentionDays} days.`);
+    }
+    return deletedCount;
   }
 };
