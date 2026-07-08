@@ -104,6 +104,60 @@ async function seed() {
   });
   console.log('Created/Updated Agent Task:', agentTask.id);
 
+  // 2.4. Create Sannysoft Anti-Bot Block
+  const antibotBlock = db.saveBlock({
+    id: 'sannysoft-antibot-block',
+    name: 'Anti-Bot Fingerprint Test',
+    description: 'Navega para sannysoft.com para verificar a detecção do WebDriver e gerar uma screenshot de resultado.',
+    steps: [
+      {
+        type: 'navigate',
+        url: 'https://bot.sannysoft.com'
+      },
+      {
+        type: 'wait',
+        condition: 'load',
+        selector: ''
+      },
+      {
+        type: 'take_screenshot'
+      }
+    ]
+  });
+  console.log('Created/Updated Anti-Bot Block:', antibotBlock.id);
+
+  // 2.5. Create task pipeline with anti-detection enabled
+  const evadedTask = db.saveTask({
+    id: 'bot-evaded-pipeline',
+    name: 'Anti-Bot Test (Bypass)',
+    description: 'Pipeline de teste rodando com o modo Anti-Detecção ativado.',
+    antiDetection: true,
+    blocks: [
+      {
+        id: 'evaded-instance-1',
+        blockId: antibotBlock.id,
+        parameterValues: {}
+      }
+    ]
+  });
+  console.log('Created/Updated Evaded Task:', evadedTask.id);
+
+  // 2.6. Create task pipeline with anti-detection disabled (standard)
+  const detectedTask = db.saveTask({
+    id: 'bot-detected-pipeline',
+    name: 'Anti-Bot Test (Default)',
+    description: 'Pipeline de teste padrão rodando sem evasão de detecção.',
+    antiDetection: false,
+    blocks: [
+      {
+        id: 'detected-instance-1',
+        blockId: antibotBlock.id,
+        parameterValues: {}
+      }
+    ]
+  });
+  console.log('Created/Updated Detected Task:', detectedTask.id);
+
   // 3. Create a Schedule (disabled by default)
   const schedule = db.saveSchedule({
     id: 'wikipedia-hourly-schedule',

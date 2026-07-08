@@ -123,6 +123,7 @@ The AutoRPA server runs on port `3000`. Below are the endpoint details, payloads
       "id": "wiki-interactive-pipeline",
       "name": "Wikipedia Interactive Pipeline",
       "description": "Pipeline que faz uma busca estática customizada e delega controle ao agente",
+      "antiDetection": true,
       "blocks": [
         {
           "id": "wiki-search-instance-1",
@@ -411,3 +412,26 @@ async function performHandoff() {
 
 performHandoff();
 ```
+
+---
+
+## 🔒 Outros Recursos Avançados do AutoRPA
+
+### 1. Modo Anti-Detecção (Evitar Detecção de Robôs)
+Se o pipeline possuir o parâmetro `"antiDetection": true` no seu JSON ou estiver com a opção ativada na interface:
+- O AutoRPA inicializará o navegador Chromium injetando o argumento `--disable-blink-features=AutomationControlled` para desabilitar o flag interno de automação.
+- Será aplicado o spoofing de `User-Agent` de navegadores reais de desktop Windows.
+- O motor injetará scripts de inicialização para remover a propriedade `navigator.webdriver` diretamente do `Navigator.prototype` e criará mocks realistas para `window.chrome`, `navigator.languages` e `navigator.plugins`.
+
+### 2. Exportação e Importação de Módulos e Pipelines
+Tanto os blocos de ações quanto os pipelines de tarefas podem ser importados/exportados como arquivos JSON:
+- **Exportar**: Baixa um arquivo `.json` contendo toda a estrutura declarada.
+- **Importar**: Permite ler um arquivo `.json` a partir do navegador, validando as estruturas e persistindo diretamente no banco.
+
+### 3. Links de Representação JSON (API) e Deep-linking
+Para facilitar o trabalho e entendimento de agentes externos:
+- **Botão Link**: Copia a URL direta da API que retorna a representação JSON crua do objeto:
+  - **Representação do Bloco**: `http://localhost:3000/api/blocks/<blockId>`
+  - **Representação da Pipeline**: `http://localhost:3000/api/tasks/<taskId>`
+- **Navegação Web (Deep-linking)**: A interface web ainda aceita os parâmetros `?tab=blocks&id=<blockId>` e `?tab=tasks&id=<taskId>` para direcionar operadores humanos às respectivas abas e painéis de edição de forma automática.
+

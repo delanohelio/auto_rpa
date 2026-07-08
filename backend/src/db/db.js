@@ -191,6 +191,7 @@ export const db = {
       name: taskData.name || 'Untitled Task',
       description: taskData.description || '',
       blocks: finalBlocks,
+      antiDetection: !!taskData.antiDetection,
       updatedAt: new Date().toISOString()
     };
 

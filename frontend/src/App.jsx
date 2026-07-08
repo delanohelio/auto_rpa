@@ -20,7 +20,10 @@ import {
   RefreshCw,
   ExternalLink,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  Upload,
+  Download,
+  Link
 } from 'lucide-react';
 
 export default function App() {
@@ -66,6 +69,7 @@ export default function App() {
 
   // Modal / Detail States
   const [selectedLog, setSelectedLog] = useState(null);
+  const [deepLinkLoaded, setDeepLinkLoaded] = useState(false);
   const [selectedScreenshot, setSelectedScreenshot] = useState(null);
 
   // ---------------- API Actions ----------------
@@ -125,6 +129,107 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [selectedLog]);
+
+  // Deep link routing effect
+  useEffect(() => {
+    if (!loading && !deepLinkLoaded && blocks.length > 0) {
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get('tab');
+      const id = params.get('id');
+
+      if (tab && id) {
+        if (tab === 'blocks') {
+          const target = blocks.find(b => b.id === id);
+          if (target) {
+            setActiveTab('blocks');
+            setEditingBlock(target);
+            setDeepLinkLoaded(true);
+          }
+        } else if (tab === 'tasks') {
+          const target = tasks.find(t => t.id === id);
+          if (target) {
+            setActiveTab('tasks');
+            setEditingTask(target);
+            setDeepLinkLoaded(true);
+          }
+        }
+      }
+    }
+  }, [loading, blocks, tasks, deepLinkLoaded]);
+
+  const handleExportBlock = (blockObj) => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(blockObj, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `block-${blockObj.id}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  const handleExportTask = (taskObj) => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(taskObj, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `task-${taskObj.id}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  const handleImportJson = async (type) => {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.json';
+    fileInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const parsed = JSON.parse(event.target.result);
+          if (type === 'block') {
+            if (!parsed.name) throw new Error('O JSON do bloco deve conter um nome.');
+            parsed.steps = parsed.steps || [];
+            parsed.parameters = parsed.parameters || [];
+            
+            const response = await fetch('/api/blocks', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(parsed)
+            });
+            if (!response.ok) throw new Error('Falha ao salvar o bloco importado.');
+            alert('Bloco importado com sucesso!');
+          } else if (type === 'task') {
+            if (!parsed.name) throw new Error('O JSON da pipeline deve conter um nome.');
+            parsed.blocks = parsed.blocks || [];
+            parsed.blockIds = parsed.blockIds || [];
+            
+            const response = await fetch('/api/tasks', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(parsed)
+            });
+            if (!response.ok) throw new Error('Falha ao salvar a pipeline importada.');
+            alert('Pipeline importada com sucesso!');
+          }
+          fetchData();
+        } catch (err) {
+          alert('Erro ao importar arquivo: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    };
+    fileInput.click();
+  };
+
+  const handleCopyShareLink = (tab, id) => {
+    const shareUrl = `${window.location.origin}/api/${tab}/${id}`;
+    navigator.clipboard.writeText(shareUrl)
+      .then(() => alert('Link da representação JSON copiado para a área de transferência!'))
+      .catch(() => alert('Erro ao copiar link.'));
+  };
 
   // Handle manual task run
   const triggerTaskRun = async (taskId, overrides = {}) => {
@@ -653,12 +758,20 @@ export default function App() {
                     <h2>Blocos de Ação</h2>
                     <p>Agrupamentos reutilizáveis de comandos de automação</p>
                   </div>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => setEditingBlock({ name: '', description: '', steps: [], secrets: {} })}
-                  >
-                    <Plus size={16} /> Criar Bloco
-                  </button>
+                  <div className="gap-8">
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => handleImportJson('block')}
+                    >
+                      <Upload size={16} /> Importar Bloco
+                    </button>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => setEditingBlock({ name: '', description: '', steps: [], secrets: {} })}
+                    >
+                      <Plus size={16} /> Criar Bloco
+                    </button>
+                  </div>
                 </div>
 
                 <div className="list-wrapper">
@@ -701,7 +814,13 @@ export default function App() {
                             )}
                           </div>
                         </div>
-                        <div className="list-item-meta">
+                        <div className="list-item-meta gap-8" style={{ flexWrap: 'wrap' }}>
+                          <button className="btn btn-secondary btn-sm" title="Copiar Link de Compartilhamento" onClick={() => handleCopyShareLink('blocks', b.id)}>
+                            <Link size={12} /> Link
+                          </button>
+                          <button className="btn btn-secondary btn-sm" title="Exportar Bloco como JSON" onClick={() => handleExportBlock(b)}>
+                            <Download size={12} /> Exportar
+                          </button>
                           <button className="btn btn-secondary btn-sm" onClick={() => setEditingBlock(b)}>
                             <Edit2 size={12} /> Editar
                           </button>
@@ -1174,12 +1293,20 @@ export default function App() {
                     <h2>Pipelines de Automação (Tarefas)</h2>
                     <p>Encadeie e execute blocos lógicos estruturados</p>
                   </div>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => setEditingTask({ name: '', description: '', blockIds: [], blocks: [] })}
-                  >
-                    <Plus size={16} /> Criar Pipeline
-                  </button>
+                  <div className="gap-8">
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => handleImportJson('task')}
+                    >
+                      <Upload size={16} /> Importar Pipeline
+                    </button>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => setEditingTask({ name: '', description: '', blockIds: [], blocks: [] })}
+                    >
+                      <Plus size={16} /> Criar Pipeline
+                    </button>
+                  </div>
                 </div>
 
                 <div className="list-wrapper">
@@ -1224,13 +1351,19 @@ export default function App() {
                             })}
                           </div>
                         </div>
-                        <div className="list-item-meta">
+                        <div className="list-item-meta gap-8" style={{ flexWrap: 'wrap' }}>
                           <button
                             className="btn btn-primary btn-sm"
                             disabled={runningTasks.has(t.id)}
                             onClick={() => handleStartTask(t)}
                           >
                             <Play size={12} fill="currentColor" /> {runningTasks.has(t.id) ? 'Rodando...' : 'Executar'}
+                          </button>
+                          <button className="btn btn-secondary btn-sm" title="Copiar Link de Compartilhamento" onClick={() => handleCopyShareLink('tasks', t.id)}>
+                            <Link size={12} /> Link
+                          </button>
+                          <button className="btn btn-secondary btn-sm" title="Exportar Pipeline como JSON" onClick={() => handleExportTask(t)}>
+                            <Download size={12} /> Exportar
                           </button>
                           <button className="btn btn-secondary btn-sm" onClick={() => setEditingTask(t)}>
                             <Edit2 size={12} /> Editar
@@ -1311,7 +1444,7 @@ export default function App() {
                         />
                       </div>
                       
-                      <div className="form-group">
+                       <div className="form-group">
                         <label>Descrição</label>
                         <input
                           type="text"
@@ -1320,6 +1453,19 @@ export default function App() {
                           value={editingTask.description || ''}
                           onChange={e => setEditingTask({ ...editingTask, description: e.target.value })}
                         />
+                      </div>
+
+                      <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '16px 0' }}>
+                        <input
+                          type="checkbox"
+                          id="antiDetectionCheckbox"
+                          checked={!!editingTask.antiDetection}
+                          onChange={e => setEditingTask({ ...editingTask, antiDetection: e.target.checked })}
+                          style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                        />
+                        <label htmlFor="antiDetectionCheckbox" style={{ fontSize: '13px', fontWeight: '600', cursor: 'pointer', margin: 0 }}>
+                          Ativar Modo Anti-Detecção (Evita detecção de robôs / bypass bot detection)
+                        </label>
                       </div>
 
                       <div className="form-group" style={{ marginTop: '32px' }}>

@@ -147,15 +147,52 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
   try {
     console.log(`Starting execution of Task: "${task.name}" (${taskId})`);
     
+    const launchArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'];
+    if (task.antiDetection) {
+      launchArgs.push('--disable-blink-features=AutomationControlled');
+    }
+
     // Launch headless chromium with sandbox disable args for Docker container compatibility
     browser = await chromium.launch({
       headless: process.env.HEADLESS !== 'false',
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+      args: launchArgs
     });
 
-    context = await browser.newContext({
+    const contextOptions = {
       viewport: { width: 1280, height: 720 }
-    });
+    };
+
+    if (task.antiDetection) {
+      console.log('Anti-Detection mode enabled for task browser context.');
+      contextOptions.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+      contextOptions.extraHTTPHeaders = {
+        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"'
+      };
+    }
+
+    context = await browser.newContext(contextOptions);
+
+    if (task.antiDetection) {
+      // Overwrite webdriver navigator flag and chrome objects
+      await context.addInitScript(() => {
+        // Delete webdriver from Prototype to bypass modern detection
+        try {
+          delete Navigator.prototype.webdriver;
+        } catch (e) {}
+        window.chrome = {
+          runtime: {},
+          loadTimes: function() {},
+          csi: function() {},
+          app: {}
+        };
+        Object.defineProperty(navigator, 'languages', { get: () => ['pt-BR', 'pt', 'en-US', 'en'] });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+      });
+    }
+
 
     page = await context.newPage();
 

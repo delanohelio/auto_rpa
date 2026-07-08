@@ -94,13 +94,13 @@ app.get('/api/tasks/:id', (req, res) => {
 
 app.post('/api/tasks', (req, res) => {
   try {
-    const { id, name, description, blockIds, blocks } = req.body;
+    const { id, name, description, blockIds, blocks, antiDetection } = req.body;
     if (!name) return res.status(400).json({ error: 'Task name is required' });
     if ((!blockIds || !Array.isArray(blockIds)) && (!blocks || !Array.isArray(blocks))) {
       return res.status(400).json({ error: 'Block list is required' });
     }
     
-    const saved = db.saveTask({ id, name, description, blockIds, blocks });
+    const saved = db.saveTask({ id, name, description, blockIds, blocks, antiDetection });
     res.json(saved);
   } catch (error) {
     res.status(500).json({ error: error.message });

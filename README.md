@@ -144,3 +144,23 @@ O **AutoRPA** possui um barramento de controle que permite que agentes de IA e s
 5. Uma vez conectado, o agente manipula a página enviando comandos para **`POST /api/agent/execute`** (com suporte a ações como `eval`, `navigate`, `click`, `fill`, `screenshot` e `html`).
 6. Por fim, o agente devolve o controle para a pipeline prosseguir chamando **`POST /api/agent/release`** com `{ runId }`.
 
+---
+
+## 🔒 Outros Recursos Avançados
+
+### 1. Modo Anti-Detecção (Bypass Bot Detection)
+Para evitar o bloqueio e a detecção de automação por servidores e firewalls (como Cloudflare, Akamai e testes de impressão digital como o sannysoft):
+- Ative o checkbox **"Ativar Modo Anti-Detecção"** na edição da Pipeline ou envie `"antiDetection": true` na API.
+- O motor RPA iniciará o Playwright aplicando o argumento `--disable-blink-features=AutomationControlled`, mascarará o User-Agent, e removerá o indicador `navigator.webdriver` diretamente de `Navigator.prototype` em tempo de execução, além de mockar objetos globais do Google Chrome (`window.chrome`, plugins e idiomas).
+
+### 2. Exportação e Importação de Módulos e Pipelines
+Você pode realizar backups ou compartilhar suas automações facilmente:
+- **Exportar**: Clique em **Exportar** nos cards de Blocos de Ações ou Pipelines para baixar um arquivo JSON estruturado contendo a definição da automação.
+- **Importar**: Clique em **Importar Bloco** ou **Importar Pipeline** para ler um arquivo JSON local e carregá-lo instantaneamente no AutoRPA.
+
+### 3. Links de Representação JSON (API) e Deep-linking
+Para facilitar a leitura direta por agentes externos e operadores humanos:
+- **Botão Link**: Copia a URL direta da API que retorna a representação JSON crua do objeto (`/api/blocks/<id>` ou `/api/tasks/<id>`), facilitando a extração programática dos passos pelo agente de IA.
+- **Deep-linking Web**: A interface gráfica ainda suporta os parâmetros de URL `?tab=blocks&id=<id>` e `?tab=tasks&id=<id>` para redirecionamento automático de operadores na interface.
+
+
