@@ -10,7 +10,7 @@ services:
       # Persist database file, screenshots, and logs
       - rpa_data:/app/backend/data
     environment:
-      - PORT=3000
+      - PORT=${PORT:-3000}
       - NODE_ENV=${NODE_ENV:-production}
       # Secret key for encrypting/decrypting sensitive variables (RPA module secrets)
       - SECRET_KEY=${SECRET_KEY:-change_this_to_a_secure_random_key_in_production}
