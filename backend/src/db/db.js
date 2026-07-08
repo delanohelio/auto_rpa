@@ -354,7 +354,10 @@ export const db = {
   getSettings() {
     const data = readDB();
     if (!data.settings) {
-      data.settings = { autoCleanEnabled: false, retentionDays: 30 };
+      data.settings = { autoCleanEnabled: false, retentionDays: 30, startHookUrl: '', endHookUrl: '' };
+    } else {
+      data.settings.startHookUrl = data.settings.startHookUrl || '';
+      data.settings.endHookUrl = data.settings.endHookUrl || '';
     }
     return data.settings;
   },
@@ -363,7 +366,9 @@ export const db = {
     const data = readDB();
     data.settings = {
       autoCleanEnabled: !!settings.autoCleanEnabled,
-      retentionDays: parseInt(settings.retentionDays, 10) || 30
+      retentionDays: parseInt(settings.retentionDays, 10) || 30,
+      startHookUrl: settings.startHookUrl || '',
+      endHookUrl: settings.endHookUrl || ''
     };
     writeDB(data);
     return data.settings;
@@ -376,7 +381,7 @@ export const db = {
       tasks: Array.isArray(newData.tasks) ? newData.tasks : [],
       schedules: Array.isArray(newData.schedules) ? newData.schedules : [],
       logs: Array.isArray(newData.logs) ? newData.logs : [],
-      settings: newData.settings || { autoCleanEnabled: false, retentionDays: 30 }
+      settings: newData.settings || { autoCleanEnabled: false, retentionDays: 30, startHookUrl: '', endHookUrl: '' }
     };
     writeDB(validated);
     return true;

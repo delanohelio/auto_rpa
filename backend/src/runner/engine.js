@@ -97,6 +97,21 @@ function getPlaywrightSelector(selector, type) {
   }
 }
 
+async function triggerWebhook(url, payload) {
+  if (!url) return;
+  console.log(`Triggering webhook: ${url}`);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    console.log(`Webhook response status: ${res.status}`);
+  } catch (err) {
+    console.error(`Webhook call failed for ${url}:`, err.message);
+  }
+}
+
 /**
  * Run a single Task Pipeline
  * @param {string} taskId - The ID of the task to execute
@@ -142,6 +157,23 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
       definition: block,
       instance: instance
     });
+  }
+
+  logRecord.status = 'running';
+  db.addLog(logRecord); // Write log state so the UI picks it up immediately
+
+  const settings = db.getSettings();
+  const startHookUrl = settings.startHookUrl;
+  const endHookUrl = settings.endHookUrl;
+
+  if (startHookUrl) {
+    triggerWebhook(startHookUrl, {
+      event: 'pipeline_started',
+      runId,
+      taskId,
+      taskName: task.name,
+      startedAt
+    }).catch(() => {});
   }
 
   let browser = null;
@@ -263,6 +295,7 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
         };
 
         logRecord.stepsExecuted.push(stepLog);
+        db.addLog(logRecord); // Update log state so UI shows step as running
 
         // Handle conditional skipping
         if (skipNextStep) {
@@ -464,6 +497,7 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
 
           stepLog.status = 'success';
           stepLog.endedAt = new Date().toISOString();
+          db.addLog(logRecord); // Update log state so UI shows step as completed
         } catch (stepError) {
           console.error(`Step failed execution: ${stepError.message}`);
           stepLog.status = 'failure';
@@ -495,14 +529,29 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
   } finally {
     const endedAt = new Date().toISOString();
     logRecord.endedAt = endedAt;
-    logRecord.duration = Math.round((new Date(endedAt) - new Date(startedAt)) / 1000); // duration in seconds
-    
+    logRecord.duration = Math.round((new Date(endedAt) - new Date(startedAt)) / 1000);
+
     // Close browser resources
     if (context) await context.close().catch(() => {});
     if (browser) await browser.close().catch(() => {});
     
-    // Write log to DB
+    // Write final log status to DB
     db.addLog(logRecord);
+
+    if (endHookUrl) {
+      triggerWebhook(endHookUrl, {
+        event: 'pipeline_completed',
+        runId,
+        taskId,
+        taskName: task.name,
+        status: logRecord.status,
+        startedAt,
+        endedAt,
+        duration: logRecord.duration,
+        error: logRecord.error,
+        stepsExecuted: logRecord.stepsExecuted
+      }).catch(() => {});
+    }
   }
 
   return logRecord;

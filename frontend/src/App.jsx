@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   LayoutDashboard,
   Boxes,
@@ -33,6 +33,9 @@ import {
 export default function App() {
   // Navigation State
   const [activeTab, setActiveTab] = useState('dashboard');
+  
+  // Track notified runs to avoid duplicates
+  const notifiedRuns = useRef(new Set());
 
   // Auth state variables
   const [isAuthenticated, setIsAuthenticated] = useState(true);
@@ -278,6 +281,9 @@ export default function App() {
 
   useEffect(() => {
     checkAuthStatus();
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
   }, []);
 
   useEffect(() => {
@@ -290,6 +296,19 @@ export default function App() {
       try {
         const freshLogs = await apiFetch('/api/logs').then(r => r.json());
         setLogs(freshLogs);
+
+        // Dispatch browser notifications for completed runs
+        freshLogs.forEach(l => {
+          if ((l.status === 'success' || l.status === 'failure') && !notifiedRuns.current.has(l.id)) {
+            notifiedRuns.current.add(l.id);
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification(`Pipeline Finalizada`, {
+                body: `A pipeline "${l.taskName}" terminou com ${l.status === 'success' ? 'SUCESSO' : 'FALHA'}.`,
+                icon: l.status === 'success' ? '/favicon.ico' : undefined
+              });
+            }
+          }
+        });
         
         // Update active schedules info
         const freshSchedules = await apiFetch('/api/schedules').then(r => r.json());
@@ -438,8 +457,21 @@ export default function App() {
         const errData = await response.json();
         alert(`Falha ao iniciar: ${errData.error}`);
       } else {
+        const resData = await response.json();
         // Switch to logs tab to view run
         setActiveTab('logs');
+        
+        // Fetch logs immediately and open the modal for this execution
+        try {
+          const freshLogs = await apiFetch('/api/logs').then(r => r.json());
+          setLogs(freshLogs);
+          const newLog = freshLogs.find(l => l.id === resData.runId);
+          if (newLog) {
+            setSelectedLog(newLog);
+          }
+        } catch (e) {
+          console.error('Failed to auto-open log modal:', e);
+        }
       }
     } catch (err) {
       alert(`Erro de conexão: ${err.message}`);
@@ -2239,6 +2271,44 @@ export default function App() {
 
                   <button className="btn btn-primary" style={{ alignSelf: 'flex-start' }} onClick={handleSaveSettings}>
                     Salvar Configurações
+                  </button>
+                </div>
+              </div>
+
+              {/* Webhook Configuration Card */}
+              <div className="card" style={{ padding: '24px' }}>
+                <h3 style={{ fontSize: '18px', display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+                  <ExternalLink size={20} className="text-secondary" /> Webhooks de Execução
+                </h3>
+                <p className="text-muted" style={{ fontSize: '13px', marginBottom: '20px' }}>
+                  Configure endpoints HTTP POST que serão notificados em tempo real quando qualquer pipeline for iniciada e concluída.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px' }}>URL de Início da Execução</label>
+                    <input
+                      type="url"
+                      className="form-control"
+                      placeholder="Ex: https://meuhook.com/autorpa/start"
+                      value={settings.startHookUrl || ''}
+                      onChange={e => setSettings(prev => ({ ...prev, startHookUrl: e.target.value }))}
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px' }}>URL de Fim da Execução</label>
+                    <input
+                      type="url"
+                      className="form-control"
+                      placeholder="Ex: https://meuhook.com/autorpa/end"
+                      value={settings.endHookUrl || ''}
+                      onChange={e => setSettings(prev => ({ ...prev, endHookUrl: e.target.value }))}
+                    />
+                  </div>
+
+                  <button className="btn btn-primary" style={{ alignSelf: 'flex-start' }} onClick={handleSaveSettings}>
+                    Salvar Webhooks
                   </button>
                 </div>
               </div>
