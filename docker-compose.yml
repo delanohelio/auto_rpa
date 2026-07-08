@@ -1,0 +1,23 @@
+services:
+  rpa-orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rpa_orchestrator
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persist database file, screenshots, and logs
+      - rpa_data:/app/backend/data
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      # Secret key for encrypting/decrypting sensitive variables (RPA module secrets)
+      - SECRET_KEY=change_this_to_a_secure_random_key_in_production
+      # Run playwright headlessly
+      - HEADLESS=true
+    restart: unless-stopped
+
+volumes:
+  rpa_data:
+    driver: local
