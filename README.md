@@ -82,6 +82,19 @@ Para cadastrar dados sensíveis:
 
 ---
 
+## 🏷️ Módulos Parametrizados e Sobrescritas (Parâmetros)
+
+O AutoRPA permite criar blocos de ação dinâmicos utilizando variáveis parametrizáveis:
+
+1. **Parâmetros de Blocos**: Ao editar ou criar um Bloco, declare parâmetros fornecendo um nome (ex: `termo_busca`) e um valor padrão. No corpo das etapas do bloco, use a sintaxe `{{param:termo_busca}}`.
+2. **Sobrescritas Estáticas (Pipeline)**: Na montagem de uma tarefa (Pipeline), você pode preencher valores customizados para os parâmetros de cada bloco adicionado.
+3. **Sobrescritas Dinâmicas (Runtime)**: Ao iniciar manualmente uma execução a partir da interface, o modal **"Configurar Execução"** será exibido, permitindo alterar os valores dos parâmetros apenas para aquela rodada.
+4. **Ordem de Precedência**: Na resolução de variáveis, o motor respeita a precedência: **Overrides Temporários (Runtime) > Overrides Estáticos (Pipeline) > Padrões do Bloco (Default) > String vazia ("")**.
+
+Além disso, a interface sinaliza visualmente com badges roxos os blocos e pipelines que contêm **Controle de Agente**, bem como a contagem de parâmetros ativos em cada bloco.
+
+---
+
 ## 🚀 Como Rodar a Aplicação
 
 ### Opção 1: Via Docker Compose (Recomendado para Produção)
