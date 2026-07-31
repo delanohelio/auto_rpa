@@ -30,6 +30,18 @@ import {
   ShieldAlert
 } from 'lucide-react';
 
+// Safe UUID generator supporting insecure (non-HTTPS) contexts
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 export default function App() {
   // Navigation State
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -704,12 +716,12 @@ export default function App() {
   const addBlockToTask = (blockId) => {
     setEditingTask(prev => {
       const currentBlocks = prev.blocks || (prev.blockIds || []).map(bid => ({
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         blockId: bid,
         parameterValues: {}
       }));
       const newBlockInstance = {
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         blockId: blockId,
         parameterValues: {}
       };
@@ -725,7 +737,7 @@ export default function App() {
   const removeBlockFromTask = (index) => {
     setEditingTask(prev => {
       const currentBlocks = prev.blocks || (prev.blockIds || []).map(bid => ({
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         blockId: bid,
         parameterValues: {}
       }));
@@ -741,7 +753,7 @@ export default function App() {
   const moveBlockInTask = (index, direction) => {
     setEditingTask(prev => {
       const currentBlocks = [...(prev.blocks || (prev.blockIds || []).map(bid => ({
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         blockId: bid,
         parameterValues: {}
       })))];
