@@ -81,19 +81,34 @@ function hasCssSpecifiers(selector) {
  * Convert user click selectors into Playwright selector syntax
  */
 function getPlaywrightSelector(selector, type) {
+  if (!selector) return '';
+  const trimmed = selector.trim();
+
   switch (type) {
     case 'id':
-      if (hasCssSpecifiers(selector)) return selector;
-      return selector.startsWith('#') ? selector : `#${selector}`;
+      if (trimmed.startsWith('xpath=') || trimmed.startsWith('//') || trimmed.startsWith('(//') || hasCssSpecifiers(trimmed)) {
+        return trimmed.startsWith('//') || trimmed.startsWith('(//') ? (trimmed.startsWith('xpath=') ? trimmed : `xpath=${trimmed}`) : trimmed;
+      }
+      return trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+
     case 'class':
-      if (hasCssSpecifiers(selector)) return selector;
-      return selector.startsWith('.') ? selector : `.${selector}`;
+      if (trimmed.startsWith('xpath=') || trimmed.startsWith('//') || trimmed.startsWith('(//') || hasCssSpecifiers(trimmed)) {
+        return trimmed.startsWith('//') || trimmed.startsWith('(//') ? (trimmed.startsWith('xpath=') ? trimmed : `xpath=${trimmed}`) : trimmed;
+      }
+      return trimmed.startsWith('.') ? trimmed : `.${trimmed}`;
+
     case 'xpath':
-      return selector.startsWith('xpath=') ? selector : `xpath=${selector}`;
+      return trimmed.startsWith('xpath=') ? trimmed : `xpath=${trimmed}`;
+
     case 'text':
-      return `text="${selector}"`;
+      return trimmed.startsWith('text=') ? trimmed : `text="${trimmed}"`;
+
+    case 'css':
     default:
-      return selector;
+      if (trimmed.startsWith('//') || trimmed.startsWith('(//')) {
+        return `xpath=${trimmed}`;
+      }
+      return trimmed;
   }
 }
 
@@ -335,11 +350,7 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
               if (!selector) throw new Error('Type command requires a selector');
               
               console.log(`Typing into: ${selector}`);
-              if (step.selector_type === 'id') {
-                const pwSelector = (selector.startsWith('#') || hasCssSpecifiers(selector)) ? selector : `#${selector}`;
-                await page.waitForSelector(pwSelector, { state: 'attached', timeout: 15000 });
-                await page.fill(pwSelector, text || '', { timeout: 15000 });
-              } else if (step.selector_type === 'label') {
+              if (step.selector_type === 'label') {
                 // Find element by label text
                 const locator = page.getByLabel(selector, { exact: false });
                 await locator.fill(text || '', { timeout: 15000 });
@@ -348,9 +359,9 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
                 const locator = page.getByPlaceholder(selector, { exact: false });
                 await locator.fill(text || '', { timeout: 15000 });
               } else {
-                // Fallback direct selector type
-                await page.waitForSelector(selector, { state: 'attached', timeout: 15000 });
-                await page.fill(selector, text || '', { timeout: 15000 });
+                const pwSelector = getPlaywrightSelector(selector, step.selector_type);
+                await page.waitForSelector(pwSelector, { state: 'attached', timeout: 15000 });
+                await page.fill(pwSelector, text || '', { timeout: 15000 });
               }
               break;
             }
@@ -363,8 +374,9 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
               } else if (condition === 'visible') {
                 const selector = resolveText(step.selector, decryptedSecrets, mergedParams);
                 if (!selector) throw new Error('Wait visible command requires a selector');
-                console.log(`Waiting for element visibility: ${selector}`);
-                await page.waitForSelector(selector, { state: 'visible', timeout: 30000 });
+                const pwSelector = getPlaywrightSelector(selector, step.selector_type);
+                console.log(`Waiting for element visibility: ${pwSelector}`);
+                await page.waitForSelector(pwSelector, { state: 'visible', timeout: 30000 });
               }
               break;
             }
@@ -389,16 +401,22 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
               if (!query) throw new Error('ListElements command requires a query selector');
               console.log(`Listing elements for query: ${query}`);
               
-              const elements = await page.$$eval(query, els => {
-                return els.map(el => ({
-                  text: el.textContent ? el.textContent.trim() : '',
-                  html: el.outerHTML,
-                  attributes: Array.from(el.attributes).reduce((acc, attr) => {
+              const pwSelector = getPlaywrightSelector(query, step.selector_type || 'css');
+              const locator = page.locator(pwSelector);
+              const count = await locator.count();
+              const elements = [];
+              for (let i = 0; i < count; i++) {
+                const el = locator.nth(i);
+                const text = (await el.innerText().catch(() => '')) || '';
+                const html = (await el.evaluate(node => node.outerHTML).catch(() => '')) || '';
+                const attributes = await el.evaluate(node => {
+                  return Array.from(node.attributes).reduce((acc, attr) => {
                     acc[attr.name] = attr.value;
                     return acc;
-                  }, {})
-                }));
-              });
+                  }, {});
+                }).catch(() => ({}));
+                elements.push({ text: text.trim(), html, attributes });
+              }
               stepLog.data = { count: elements.length, elements };
               break;
             }
@@ -440,10 +458,11 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
             case 'conditional_if': {
               const selector = resolveText(step.selector_exists, decryptedSecrets, mergedParams);
               if (!selector) throw new Error('ConditionalIf command requires a selector_exists parameter');
-              console.log(`Evaluating if selector exists: ${selector}`);
+              const pwSelector = getPlaywrightSelector(selector, step.selector_type);
+              console.log(`Evaluating if selector exists: ${pwSelector}`);
               
               // Wait briefly to check if it's there
-              const exists = (await page.locator(selector).count()) > 0;
+              const exists = (await page.locator(pwSelector).count()) > 0;
               console.log(`Condition result: ${exists}`);
               
               stepLog.data = { conditionMet: exists };

@@ -453,3 +453,11 @@ Você pode restringir o acesso à interface administrativa do AutoRPA e à API R
 - Caso configurada, a interface web passará a exigir login por senha na tela de abertura.
 - Scripts e ferramentas externas devem passar a senha nos cabeçalhos HTTP através da chave `x-system-password` em todas as requisições API.
 
+### 7. Suporte Ampliado a XPath em Todas as Ações de Seleção
+Todas as ações que operam sobre elementos DOM (`click`, `type`, `wait`, `list_elements` e `conditional_if`) contam com suporte nativo a XPath:
+- **`click`**: `"selector_type": "xpath"`, `"selector": "//button[@type='submit']"`
+- **`type`**: `"selector_type": "xpath"`, `"selector": "//input[@name='user.login']"`, `"text": "meu_usuario"`
+- **`wait`**: `"condition": "visible"`, `"selector_type": "xpath"`, `"selector": "//div[contains(@class, 'modal')]"`
+- **`list_elements`**: `"selector_type": "xpath"`, `"query_selector": "//table//tr"`
+- **`conditional_if`**: `"selector_type": "xpath"`, `"selector_exists": "//button[contains(., 'Aceitar')]"`
+

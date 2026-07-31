@@ -7,8 +7,11 @@ services:
     ports:
       - "${PORT:-3000}:3000"
     volumes:
-      # Persist database file, screenshots, and logs
+      # Onde a aplicação salva os dados: /app/backend/data (db.json, secret.key, screenshots/ e downloads/)
+      # Opção 1: Volume nomeado gerenciado pelo Docker (Padrão)
       - rpa_data:/app/backend/data
+      # Opção 2: Mapeamento de pasta física no servidor/host (Exemplo)
+      # - ./data:/app/backend/data
     environment:
       - PORT=${PORT:-3000}
       - NODE_ENV=${NODE_ENV:-production}

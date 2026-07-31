@@ -181,4 +181,11 @@ Para proteger o orquestrador em rede exposta, defina `SYSTEM_PASSWORD` no arquiv
 - A interface React exibirá uma tela de autenticação por senha.
 - Requisições REST API externas de robôs ou agentes externos devem incluir o cabeçalho HTTP `'x-system-password': 'suasenha'`.
 
+### 7. Suporte a XPath em Todas as Ações de Seleção
+Todas as etapas de ação que interagem com o DOM suportam seleção por XPath:
+- **Digitar / Preencher (`type`)**: Permite localizar campos via XPath (ex: `//input[@name='login']`).
+- **Aguardar Elemento Visível (`wait`)**: Permite aguardar a visibilidade de elementos via XPath (ex: `//div[contains(@class, 'success')]`).
+- **Listar Elementos (`list_elements`)**: Extrai múltiplos nós DOM via XPath.
+- **Seletor Condicional (`conditional_if`)**: Avalia a existência de elementos na página via XPath.
+
 

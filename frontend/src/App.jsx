@@ -1407,7 +1407,7 @@ export default function App() {
                                       value={step.selector_type || 'id'}
                                       onChange={e => updateStepField(index, 'selector_type', e.target.value)}
                                     >
-                                      <option value="id">ID</option>
+                                      <option value="id">ID / Seletor CSS</option>
                                       <option value="class">Classe CSS</option>
                                       <option value="xpath">XPath</option>
                                       <option value="text">Texto do Elemento</option>
@@ -1418,7 +1418,7 @@ export default function App() {
                                     <input
                                       type="text"
                                       className="form-control"
-                                      placeholder="Seletor alvo"
+                                      placeholder="Ex: #btn-salvar ou //button[@type='submit']"
                                       value={step.selector || ''}
                                       onChange={e => updateStepField(index, 'selector', e.target.value)}
                                       required
@@ -1437,6 +1437,8 @@ export default function App() {
                                       onChange={e => updateStepField(index, 'selector_type', e.target.value)}
                                     >
                                       <option value="id">ID / Seletor CSS</option>
+                                      <option value="xpath">XPath</option>
+                                      <option value="class">Classe CSS</option>
                                       <option value="label">Texto da Label</option>
                                       <option value="placeholder">Texto do Placeholder</option>
                                     </select>
@@ -1446,7 +1448,7 @@ export default function App() {
                                     <input
                                       type="text"
                                       className="form-control"
-                                      placeholder="Ex: username ou #input-email"
+                                      placeholder="Ex: #input-email ou //input[@name='login']"
                                       value={step.selector || ''}
                                       onChange={e => updateStepField(index, 'selector', e.target.value)}
                                       required
@@ -1457,7 +1459,7 @@ export default function App() {
                                     <input
                                       type="text"
                                       className="form-control"
-                                      placeholder="Texto a preencher (pode usar {{secret:sua_chave}})"
+                                      placeholder="Texto a preencher (pode usar {{secret:sua_chave}} ou {{param:nome}})"
                                       value={step.text || ''}
                                       onChange={e => updateStepField(index, 'text', e.target.value)}
                                     />
@@ -1479,17 +1481,32 @@ export default function App() {
                                     </select>
                                   </div>
                                   {step.condition === 'visible' && (
-                                    <div>
-                                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Seletor do Elemento</label>
-                                      <input
-                                        type="text"
-                                        className="form-control"
-                                        placeholder="Ex: .success-message ou #dashboard"
-                                        value={step.selector || ''}
-                                        onChange={e => updateStepField(index, 'selector', e.target.value)}
-                                        required
-                                      />
-                                    </div>
+                                    <>
+                                      <div>
+                                        <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Tipo de Seletor</label>
+                                        <select
+                                          className="form-control"
+                                          value={step.selector_type || 'id'}
+                                          onChange={e => updateStepField(index, 'selector_type', e.target.value)}
+                                        >
+                                          <option value="id">ID / Seletor CSS</option>
+                                          <option value="xpath">XPath</option>
+                                          <option value="class">Classe CSS</option>
+                                          <option value="text">Texto do Elemento</option>
+                                        </select>
+                                      </div>
+                                      <div style={{ gridColumn: 'span 2' }}>
+                                        <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Seletor do Elemento</label>
+                                        <input
+                                          type="text"
+                                          className="form-control"
+                                          placeholder="Ex: .success-message ou //div[contains(@class, 'modal')]"
+                                          value={step.selector || ''}
+                                          onChange={e => updateStepField(index, 'selector', e.target.value)}
+                                          required
+                                        />
+                                      </div>
+                                    </>
                                   )}
                                 </>
                               )}
@@ -1521,17 +1538,30 @@ export default function App() {
                               )}
 
                               {step.type === 'list_elements' && (
-                                <div style={{ gridColumn: 'span 2' }}>
-                                  <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Query Selector DOM (CSS)</label>
-                                  <input
-                                    type="text"
-                                    className="form-control"
-                                    placeholder="Ex: table.results tr.item ou a.links-external"
-                                    value={step.query_selector || ''}
-                                    onChange={e => updateStepField(index, 'query_selector', e.target.value)}
-                                    required
-                                  />
-                                </div>
+                                <>
+                                  <div>
+                                    <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Tipo de Seletor</label>
+                                    <select
+                                      className="form-control"
+                                      value={step.selector_type || 'css'}
+                                      onChange={e => updateStepField(index, 'selector_type', e.target.value)}
+                                    >
+                                      <option value="css">Seletor CSS</option>
+                                      <option value="xpath">XPath</option>
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Query / Seletor Alvo</label>
+                                    <input
+                                      type="text"
+                                      className="form-control"
+                                      placeholder="Ex: table.results tr.item ou //table//tr"
+                                      value={step.query_selector || ''}
+                                      onChange={e => updateStepField(index, 'query_selector', e.target.value)}
+                                      required
+                                    />
+                                  </div>
+                                </>
                               )}
 
                               {step.type === 'take_screenshot' && (
@@ -1570,17 +1600,32 @@ export default function App() {
                               )}
 
                               {step.type === 'conditional_if' && (
-                                <div style={{ gridColumn: 'span 2' }}>
-                                  <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Executar próxima ação APENAS SE o seletor existir:</label>
-                                  <input
-                                    type="text"
-                                    className="form-control"
-                                    placeholder="Ex: button#accept-cookies ou div.alert-modal"
-                                    value={step.selector_exists || ''}
-                                    onChange={e => updateStepField(index, 'selector_exists', e.target.value)}
-                                    required
-                                  />
-                                </div>
+                                <>
+                                  <div>
+                                    <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Tipo de Seletor</label>
+                                    <select
+                                      className="form-control"
+                                      value={step.selector_type || 'id'}
+                                      onChange={e => updateStepField(index, 'selector_type', e.target.value)}
+                                    >
+                                      <option value="id">ID / Seletor CSS</option>
+                                      <option value="xpath">XPath</option>
+                                      <option value="class">Classe CSS</option>
+                                      <option value="text">Texto do Elemento</option>
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Seletor do Elemento Existe:</label>
+                                    <input
+                                      type="text"
+                                      className="form-control"
+                                      placeholder="Ex: button#accept-cookies ou //div[@class='alert']"
+                                      value={step.selector_exists || ''}
+                                      onChange={e => updateStepField(index, 'selector_exists', e.target.value)}
+                                      required
+                                    />
+                                  </div>
+                                </>
                               )}
 
                               {step.type === 'agent_control' && (
