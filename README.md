@@ -188,4 +188,10 @@ Todas as etapas de ação que interagem com o DOM suportam seleção por XPath:
 - **Listar Elementos (`list_elements`)**: Extrai múltiplos nós DOM via XPath.
 - **Seletor Condicional (`conditional_if`)**: Avalia a existência de elementos na página via XPath.
 
+### 8. Preenchimento Interativo de Variáveis em Tempo de Execução (`user_prompt`) & Timeout em `wait`
+- **Etapa de Prompt Interativo**: Permite pausar a execução para que o operador informe valores de variáveis em tempo real através da interface visual.
+- **Extração Dinâmica de Dados**: O passo aceita um script JavaScript opcional para extrair elementos da página (como listas de opções de um `<select>`), gerando dropdowns dinâmicos no modal de execução.
+- **Pulo no Disparo**: Ao iniciar uma pipeline, o usuário pode pré-preencher as variáveis e marcar quais deseja pular. Se todas as variáveis daquela etapa forem marcadas para pular, a pipeline não pausa e usa os valores fornecidos.
+- **Tempo Limite em `wait`**: A ação de espera (`wait`) agora possui campo para configurar o tempo limite em segundos (com padrão pré-preenchido de 30s).
+
 

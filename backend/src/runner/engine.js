@@ -25,6 +25,9 @@ if (!fs.existsSync(DOWNLOADS_DIR)) {
 // Active control sessions map for agent handoff
 export const activeControlSessions = new Map();
 
+// Active interactive user prompt sessions map
+export const activePromptSessions = new Map();
+
 
 /**
  * Replace secret and parameter references in text
@@ -133,7 +136,7 @@ async function triggerWebhook(url, payload) {
  * @param {Object} [parameterOverrides={}] - Execution-time overrides keyed by block instance ID
  * @returns {Promise<Object>} The run log record
  */
-export async function runTask(taskId, parameterOverrides = {}, runId = crypto.randomUUID()) {
+export async function runTask(taskId, parameterOverrides = {}, runId = crypto.randomUUID(), runtimeVars = {}, skipVars = []) {
   const task = db.getTask(taskId);
   if (!task) {
     throw new Error(`Task with ID ${taskId} not found`);
@@ -264,7 +267,7 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
         }
       }
 
-      // Merge parameters: Block Defaults < Task Overrides < Runtime Overrides
+      // Merge parameters: Block Defaults < Task Overrides < Runtime Overrides < Runtime Vars
       const mergedParams = {};
       if (block.parameters && Array.isArray(block.parameters)) {
         for (const param of block.parameters) {
@@ -283,6 +286,13 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
       const instanceOverrides = parameterOverrides?.[instance.id];
       if (instanceOverrides) {
         for (const [key, val] of Object.entries(instanceOverrides)) {
+          if (val !== undefined && val !== '') {
+            mergedParams[key] = val;
+          }
+        }
+      }
+      if (runtimeVars && typeof runtimeVars === 'object') {
+        for (const [key, val] of Object.entries(runtimeVars)) {
           if (val !== undefined && val !== '') {
             mergedParams[key] = val;
           }
@@ -368,15 +378,17 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
 
             case 'wait': {
               const condition = step.condition || 'load';
+              const timeoutSec = parseInt(step.timeout, 10) || 30;
+              const timeoutMs = timeoutSec * 1000;
               if (condition === 'load') {
-                console.log('Waiting for load state...');
-                await page.waitForLoadState('load', { timeout: 30000 });
+                console.log(`Waiting for load state (timeout: ${timeoutSec}s)...`);
+                await page.waitForLoadState('load', { timeout: timeoutMs });
               } else if (condition === 'visible') {
                 const selector = resolveText(step.selector, decryptedSecrets, mergedParams);
                 if (!selector) throw new Error('Wait visible command requires a selector');
                 const pwSelector = getPlaywrightSelector(selector, step.selector_type);
-                console.log(`Waiting for element visibility: ${pwSelector}`);
-                await page.waitForSelector(pwSelector, { state: 'visible', timeout: 30000 });
+                console.log(`Waiting for element visibility: ${pwSelector} (timeout: ${timeoutSec}s)`);
+                await page.waitForSelector(pwSelector, { state: 'visible', timeout: timeoutMs });
               }
               break;
             }
@@ -507,6 +519,118 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
               
               stepLog.data = { message: 'Controle do agente finalizado com sucesso.' };
               console.log('Agent control finished. Resuming pipeline execution...');
+              break;
+            }
+
+            case 'user_prompt': {
+              const stepVars = Array.isArray(step.vars) ? step.vars : [];
+              const promptTimeoutSec = parseInt(step.acquireTimeout, 10) || 1800; // Long default: 30 minutes!
+              const promptTitle = step.title || 'Preenchimento de Variáveis';
+              const promptDescription = step.description || '';
+              const skipVarList = Array.isArray(skipVars) ? skipVars : [];
+
+              // Check if ALL variables defined in this step were marked to skip
+              const allSkipped = stepVars.length > 0 && stepVars.every(v => skipVarList.includes(v.name));
+
+              if (allSkipped) {
+                console.log(`Skipping interactive prompt "${promptTitle}" because all variables were pre-filled and marked to skip.`);
+                for (const v of stepVars) {
+                  const val = runtimeVars[v.name] !== undefined && runtimeVars[v.name] !== ''
+                    ? runtimeVars[v.name]
+                    : (mergedParams[v.name] !== undefined && mergedParams[v.name] !== '' ? mergedParams[v.name] : (v.defaultValue !== undefined ? v.defaultValue : ''));
+                  mergedParams[v.name] = val;
+                  runtimeVars[v.name] = val;
+                }
+                stepLog.status = 'success';
+                stepLog.data = {
+                  skipped: true,
+                  message: 'Pausa interativa pulada conforme configurado no início da execução.',
+                  values: { ...runtimeVars }
+                };
+                break;
+              }
+
+              // Not all skipped: pause and prompt user
+              console.log(`Pipeline paused at user_prompt: "${promptTitle}". Waiting for input (timeout: ${promptTimeoutSec}s)...`);
+
+              // Evaluate dynamic_script if provided in page context
+              let dynamicData = null;
+              if (step.dynamic_script) {
+                try {
+                  const resolvedScript = resolveText(step.dynamic_script, decryptedSecrets, mergedParams);
+                  if (resolvedScript) {
+                    console.log('Evaluating dynamic_script for user_prompt in page context...');
+                    dynamicData = await page.evaluate(resolvedScript);
+                  }
+                } catch (scriptErr) {
+                  console.error('Error evaluating dynamic_script in user_prompt:', scriptErr.message);
+                  dynamicData = { error: scriptErr.message };
+                }
+              }
+
+              // Prepare prefilled variables with runtime/default values
+              const prefilledVars = stepVars.map(v => {
+                const val = runtimeVars[v.name] !== undefined && runtimeVars[v.name] !== ''
+                  ? runtimeVars[v.name]
+                  : (mergedParams[v.name] !== undefined && mergedParams[v.name] !== '' ? mergedParams[v.name] : (v.defaultValue !== undefined ? v.defaultValue : ''));
+                return {
+                  name: v.name,
+                  label: v.label || v.name,
+                  value: val,
+                  defaultValue: v.defaultValue !== undefined ? v.defaultValue : ''
+                };
+              });
+
+              stepLog.status = 'running';
+              stepLog.data = {
+                isUserPrompt: true,
+                promptTitle,
+                promptDescription,
+                vars: prefilledVars,
+                dynamicData,
+                timeoutSec: promptTimeoutSec
+              };
+              db.addLog(logRecord); // Write log state so UI picks up the prompt immediately
+
+              const submittedValues = await new Promise((resolve, reject) => {
+                const session = {
+                  runId,
+                  stepIndex: sIndex,
+                  status: 'waiting',
+                  promptTitle,
+                  promptDescription,
+                  vars: prefilledVars,
+                  dynamicData,
+                  timeoutTimer: null,
+                  resolvePromise: resolve,
+                  rejectPromise: reject
+                };
+
+                activePromptSessions.set(runId, session);
+
+                session.timeoutTimer = setTimeout(() => {
+                  if (activePromptSessions.has(runId)) {
+                    activePromptSessions.delete(runId);
+                    reject(new Error(`Excedeu o tempo limite (${promptTimeoutSec}s) para preenchimento das variáveis na interface.`));
+                  }
+                }, promptTimeoutSec * 1000);
+              });
+
+              // Apply submitted values to mergedParams and runtimeVars
+              if (submittedValues && typeof submittedValues === 'object') {
+                for (const [k, val] of Object.entries(submittedValues)) {
+                  mergedParams[k] = val;
+                  runtimeVars[k] = val;
+                }
+              }
+
+              stepLog.data = {
+                isUserPrompt: true,
+                completed: true,
+                submittedValues: { ...submittedValues },
+                message: 'Variáveis preenchidas e confirmadas com sucesso.'
+              };
+              console.log(`Interactive prompt "${promptTitle}" completed. Updated parameters:`, submittedValues);
               break;
             }
 

@@ -457,7 +457,31 @@ Você pode restringir o acesso à interface administrativa do AutoRPA e à API R
 Todas as ações que operam sobre elementos DOM (`click`, `type`, `wait`, `list_elements` e `conditional_if`) contam com suporte nativo a XPath:
 - **`click`**: `"selector_type": "xpath"`, `"selector": "//button[@type='submit']"`
 - **`type`**: `"selector_type": "xpath"`, `"selector": "//input[@name='user.login']"`, `"text": "meu_usuario"`
-- **`wait`**: `"condition": "visible"`, `"selector_type": "xpath"`, `"selector": "//div[contains(@class, 'modal')]"`
+- **`wait`**: `"condition": "visible"`, `"selector_type": "xpath"`, `"selector": "//div[contains(@class, 'modal')]"`, `"timeout": 30`
 - **`list_elements`**: `"selector_type": "xpath"`, `"query_selector": "//table//tr"`
 - **`conditional_if`**: `"selector_type": "xpath"`, `"selector_exists": "//button[contains(., 'Aceitar')]"`
+
+### 8. Prompt Interativo em Tempo de Execução (`user_prompt`) & Tempo Limite em `wait`
+A etapa `user_prompt` permite pausar a execução da pipeline para que um humano (ou agente) preencha variáveis dinamicamente, inclusive alimentado por scripts JS que inspecionam o DOM da página:
+
+```json
+{
+  "type": "user_prompt",
+  "title": "Seleção do Curso e Aluno",
+  "description": "Selecione o curso extraído da página e informe o nome do aluno",
+  "acquireTimeout": 1800,
+  "dynamic_script": "(() => { const opts = Array.from(document.querySelectorAll('select#cursos option')).map(o => ({ value: o.value, text: o.innerText.trim() })); return { options_for_curso_id: opts }; })()",
+  "vars": [
+    { "name": "curso_id", "label": "Curso Selecionado", "defaultValue": "101" },
+    { "name": "nome_aluno", "label": "Nome do Aluno", "defaultValue": "" }
+  ]
+}
+```
+
+- **Pulo no Início da Execução**: Na modal de disparo (`POST /api/tasks/:id/run`), o operador pode informar `runtimeVars` e declarar quais variáveis devem pular a pausa (`skipVars: ["curso_id", "nome_aluno"]`). Se **todas** as variáveis da etapa estiverem no `skipVars`, o pipeline não pausa e segue com os valores fornecidos ou valores padrão.
+- **Extração Dinâmica (`dynamic_script`)**: O script roda na página ativa e pode retornar opções de `<select>` (ex: `options_for_<nome_da_var>`), gerando dropdowns dinâmicos no modal de execução do frontend.
+- **API Interativa**:
+  - `GET /api/interactive/sessions`: Lista sessões aguardando preenchimento.
+  - `POST /api/interactive/submit`: Submete `{ "runId": "...", "values": { "curso_id": "102", "nome_aluno": "Maria" } }` para destravar e continuar o pipeline.
+- **Etapa `wait` com Timeout Configurável**: O passo `wait` agora aceita o parâmetro `"timeout": 30` (em segundos), vindo pré-preenchido com 30s por padrão.
 

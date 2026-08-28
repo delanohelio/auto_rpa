@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { db } from './db/db.js';
-import { runTask, activeControlSessions } from './runner/engine.js';
+import { runTask, activeControlSessions, activePromptSessions } from './runner/engine.js';
 import { initScheduler, startSchedule, stopSchedule, isValidCron } from './scheduler/cron.js';
 
 dotenv.config();
@@ -232,12 +232,12 @@ app.post('/api/tasks/:id/run', async (req, res) => {
     const task = db.getTask(req.params.id);
     if (!task) return res.status(404).json({ error: 'Task not found' });
 
-    const { parameterOverrides } = req.body;
-    console.log(`Manual execution requested for Task "${task.name}" with overrides:`, JSON.stringify(parameterOverrides));
+    const { parameterOverrides = {}, runtimeVars = {}, skipVars = [] } = req.body;
+    console.log(`Manual execution requested for Task "${task.name}" with overrides:`, JSON.stringify(parameterOverrides), 'runtimeVars:', JSON.stringify(runtimeVars), 'skipVars:', JSON.stringify(skipVars));
     
     const runId = crypto.randomUUID();
     // Execute asynchronously to avoid blocking the REST API request
-    runTask(task.id, parameterOverrides, runId).catch(err => {
+    runTask(task.id, parameterOverrides, runId, runtimeVars, skipVars).catch(err => {
       console.error(`Asynchronous run for task ${task.id} failed:`, err);
     });
 
@@ -463,6 +463,73 @@ app.post('/api/agent/release', (req, res) => {
     session.resolvePromise();
 
     console.log(`Agent released control of session ${runId}. Resuming pipeline.`);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- 6. INTERACTIVE USER PROMPT API ---
+
+// GET /api/interactive/sessions - Retrieve active interactive prompt sessions
+app.get('/api/interactive/sessions', (req, res) => {
+  try {
+    const { runId } = req.query;
+    if (runId) {
+      const session = activePromptSessions.get(runId);
+      if (!session) {
+        return res.status(404).json({ error: `Interactive session with runId ${runId} not found` });
+      }
+      return res.json({
+        runId,
+        stepIndex: session.stepIndex,
+        status: session.status,
+        promptTitle: session.promptTitle,
+        promptDescription: session.promptDescription,
+        vars: session.vars,
+        dynamicData: session.dynamicData
+      });
+    }
+
+    const sessionsList = [];
+    for (const [rId, session] of activePromptSessions.entries()) {
+      sessionsList.push({
+        runId: rId,
+        stepIndex: session.stepIndex,
+        status: session.status,
+        promptTitle: session.promptTitle,
+        promptDescription: session.promptDescription,
+        vars: session.vars,
+        dynamicData: session.dynamicData
+      });
+    }
+    res.json(sessionsList);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/interactive/submit - Submit variable values to resolve paused prompt and resume pipeline
+app.post('/api/interactive/submit', (req, res) => {
+  try {
+    const { runId, values } = req.body;
+    if (!runId) return res.status(400).json({ error: 'runId is required' });
+    if (!values || typeof values !== 'object') return res.status(400).json({ error: 'values object is required' });
+
+    const session = activePromptSessions.get(runId);
+    if (!session) {
+      return res.status(404).json({ error: 'Interactive prompt session not found or timed out' });
+    }
+
+    if (session.timeoutTimer) {
+      clearTimeout(session.timeoutTimer);
+      session.timeoutTimer = null;
+    }
+
+    activePromptSessions.delete(runId);
+    session.resolvePromise(values);
+
+    console.log(`Interactive prompt submitted for run ${runId}. Resuming pipeline with values:`, values);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });

@@ -27,7 +27,8 @@ import {
   Settings,
   LogOut,
   Database,
-  ShieldAlert
+  ShieldAlert,
+  HelpCircle
 } from 'lucide-react';
 
 // Safe UUID generator supporting insecure (non-HTTPS) contexts
@@ -248,6 +249,10 @@ export default function App() {
   // Execution overrides state
   const [execTask, setExecTask] = useState(null);
   const [runOverrides, setRunOverrides] = useState({});
+  const [runTaskVars, setRunTaskVars] = useState({});
+  const [runSkipVars, setRunSkipVars] = useState({});
+  const [promptFormValues, setPromptFormValues] = useState({});
+  const [isSubmittingPrompt, setIsSubmittingPrompt] = useState(false);
 
   const taskHasAgentControl = (taskObj) => {
     if (!taskObj.blockIds) return false;
@@ -457,13 +462,13 @@ export default function App() {
   };
 
   // Handle manual task run
-  const triggerTaskRun = async (taskId, overrides = {}) => {
+  const triggerTaskRun = async (taskId, overrides = {}, runtimeVars = {}, skipVars = []) => {
     try {
       setRunningTasks(prev => new Set([...prev, taskId]));
       const response = await apiFetch(`/api/tasks/${taskId}/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parameterOverrides: overrides })
+        body: JSON.stringify({ parameterOverrides: overrides, runtimeVars, skipVars })
       });
       if (!response.ok) {
         const errData = await response.json();
@@ -490,19 +495,47 @@ export default function App() {
     }
   };
 
-  // Inspect task parameter configurations before triggering execution
+  // Inspect task parameter configurations and prompt variables before triggering execution
   const handleStartTask = (taskObj) => {
     const taskBlocksWithParams = (taskObj.blocks || []).filter(instance => {
       const blockObj = blocks.find(b => b.id === instance.blockId);
       return blockObj && blockObj.parameters && blockObj.parameters.length > 0;
     });
 
-    if (taskBlocksWithParams.length > 0) {
+    const taskBlocksWithPrompts = (taskObj.blocks || []).filter(instance => {
+      const blockObj = blocks.find(b => b.id === instance.blockId);
+      return blockObj && blockObj.steps && blockObj.steps.some(s => s.type === 'user_prompt' && Array.isArray(s.vars) && s.vars.length > 0);
+    });
+
+    if (taskBlocksWithParams.length > 0 || taskBlocksWithPrompts.length > 0) {
       const initialOverrides = {};
       taskBlocksWithParams.forEach(inst => {
         initialOverrides[inst.id] = { ...(inst.parameterValues || {}) };
       });
+
+      const initialVars = {};
+      const initialSkip = {};
+      taskBlocksWithPrompts.forEach(inst => {
+        const blockObj = blocks.find(b => b.id === instance.blockId);
+        blockObj.steps.forEach(st => {
+          if (st.type === 'user_prompt' && Array.isArray(st.vars)) {
+            st.vars.forEach(v => {
+              if (v.name) {
+                if (initialVars[v.name] === undefined) {
+                  initialVars[v.name] = v.defaultValue || '';
+                }
+                if (initialSkip[v.name] === undefined) {
+                  initialSkip[v.name] = false;
+                }
+              }
+            });
+          }
+        });
+      });
+
       setRunOverrides(initialOverrides);
+      setRunTaskVars(initialVars);
+      setRunSkipVars(initialSkip);
       setExecTask(taskObj);
     } else {
       triggerTaskRun(taskObj.id);
@@ -642,11 +675,18 @@ export default function App() {
     if (type === 'navigate') newStep.url = '';
     if (type === 'click') { newStep.selector = ''; newStep.selector_type = 'id'; }
     if (type === 'type') { newStep.selector = ''; newStep.selector_type = 'id'; newStep.text = ''; }
-    if (type === 'wait') { newStep.condition = 'load'; newStep.selector = ''; }
+    if (type === 'wait') { newStep.condition = 'load'; newStep.selector = ''; newStep.selector_type = 'id'; newStep.timeout = 30; }
     if (type === 'press_key') newStep.key = 'Enter';
     if (type === 'list_elements') newStep.query_selector = '';
     if (type === 'conditional_if') newStep.selector_exists = '';
     if (type === 'agent_control') { newStep.acquireTimeout = 60; newStep.executionTimeout = 120; }
+    if (type === 'user_prompt') {
+      newStep.title = 'Preenchimento de Variáveis';
+      newStep.description = '';
+      newStep.acquireTimeout = 1800;
+      newStep.vars = [{ name: 'minha_var', label: 'Rótulo do Campo', defaultValue: '' }];
+      newStep.dynamic_script = '';
+    }
 
     setEditingBlock(prev => ({
       ...prev,
@@ -1341,6 +1381,7 @@ export default function App() {
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => addStepToBlock('take_screenshot')}>+ Print</button>
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => addStepToBlock('conditional_if')}>+ Condição Se</button>
                         <button type="button" className="btn btn-secondary btn-sm" style={{ borderColor: 'var(--color-secondary)' }} onClick={() => addStepToBlock('agent_control')}>+ Controle do Agente</button>
+                        <button type="button" className="btn btn-secondary btn-sm" style={{ borderColor: 'var(--color-primary)' }} onClick={() => addStepToBlock('user_prompt')}>+ Prompt Interativo</button>
                       </div>
                     </div>
 
@@ -1367,6 +1408,7 @@ export default function App() {
                                   {step.type === 'take_screenshot' && 'Tirar Screenshot'}
                                   {step.type === 'conditional_if' && 'Se Elemento Existe (Condição)'}
                                   {step.type === 'agent_control' && 'Pausar e Ceder Controle ao Agente'}
+                                  {step.type === 'user_prompt' && 'Prompt de Variáveis (Interativo)'}
                                 </span>
                               </h4>
                               <div className="gap-8">
@@ -1479,6 +1521,16 @@ export default function App() {
                                       <option value="load">Carregamento da Página (Load Event)</option>
                                       <option value="visible">Elemento Ficar Visível</option>
                                     </select>
+                                  </div>
+                                  <div>
+                                    <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Tempo Limite (segundos)</label>
+                                    <input
+                                      type="number"
+                                      className="form-control"
+                                      placeholder="Ex: 30"
+                                      value={step.timeout !== undefined ? step.timeout : 30}
+                                      onChange={e => updateStepField(index, 'timeout', parseInt(e.target.value, 10) || 0)}
+                                    />
                                   </div>
                                   {step.condition === 'visible' && (
                                     <>
@@ -1652,6 +1704,121 @@ export default function App() {
                                       onChange={e => updateStepField(index, 'executionTimeout', parseInt(e.target.value, 10) || 0)}
                                       required
                                       min={5}
+                                    />
+                                  </div>
+                                </>
+                              )}
+
+                              {step.type === 'user_prompt' && (
+                                <>
+                                  <div style={{ gridColumn: 'span 2' }}>
+                                    <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Título do Prompt</label>
+                                    <input
+                                      type="text"
+                                      className="form-control"
+                                      placeholder="Ex: Preenchimento de Dados do Aluno"
+                                      value={step.title || ''}
+                                      onChange={e => updateStepField(index, 'title', e.target.value)}
+                                    />
+                                  </div>
+                                  <div style={{ gridColumn: 'span 2' }}>
+                                    <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Instruções / Descrição</label>
+                                    <input
+                                      type="text"
+                                      className="form-control"
+                                      placeholder="Ex: Selecione a turma e confirme os dados antes de continuar"
+                                      value={step.description || ''}
+                                      onChange={e => updateStepField(index, 'description', e.target.value)}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Tempo Limite de Espera (segundos)</label>
+                                    <input
+                                      type="number"
+                                      className="form-control"
+                                      placeholder="Ex: 1800"
+                                      value={step.acquireTimeout !== undefined ? step.acquireTimeout : 1800}
+                                      onChange={e => updateStepField(index, 'acquireTimeout', parseInt(e.target.value, 10) || 0)}
+                                    />
+                                  </div>
+                                  <div style={{ gridColumn: 'span 2', marginTop: '12px' }}>
+                                    <div className="flex-between mb-8">
+                                      <label style={{ fontSize: '12px', fontWeight: '700', margin: 0 }}>Variáveis a Preencher ({((step.vars || []).length)})</label>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        onClick={() => {
+                                          const currentVars = Array.isArray(step.vars) ? [...step.vars] : [];
+                                          currentVars.push({ name: '', label: '', defaultValue: '' });
+                                          updateStepField(index, 'vars', currentVars);
+                                        }}
+                                      >
+                                        + Adicionar Variável
+                                      </button>
+                                    </div>
+                                    {(step.vars || []).map((v, vIdx) => (
+                                      <div key={vIdx} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.5fr 1.5fr 40px', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
+                                        <input
+                                          type="text"
+                                          className="form-control"
+                                          style={{ fontSize: '12px', padding: '6px 8px' }}
+                                          placeholder="Nome (ex: turma_id)"
+                                          value={v.name || ''}
+                                          onChange={e => {
+                                            const newVars = [...step.vars];
+                                            newVars[vIdx] = { ...newVars[vIdx], name: e.target.value };
+                                            updateStepField(index, 'vars', newVars);
+                                          }}
+                                        />
+                                        <input
+                                          type="text"
+                                          className="form-control"
+                                          style={{ fontSize: '12px', padding: '6px 8px' }}
+                                          placeholder="Rótulo (ex: Turma)"
+                                          value={v.label || ''}
+                                          onChange={e => {
+                                            const newVars = [...step.vars];
+                                            newVars[vIdx] = { ...newVars[vIdx], label: e.target.value };
+                                            updateStepField(index, 'vars', newVars);
+                                          }}
+                                        />
+                                        <input
+                                          type="text"
+                                          className="form-control"
+                                          style={{ fontSize: '12px', padding: '6px 8px' }}
+                                          placeholder="Padrão (ex: 101)"
+                                          value={v.defaultValue || ''}
+                                          onChange={e => {
+                                            const newVars = [...step.vars];
+                                            newVars[vIdx] = { ...newVars[vIdx], defaultValue: e.target.value };
+                                            updateStepField(index, 'vars', newVars);
+                                          }}
+                                        />
+                                        <button
+                                          type="button"
+                                          className="btn btn-danger btn-sm"
+                                          style={{ padding: '6px' }}
+                                          onClick={() => {
+                                            const newVars = step.vars.filter((_, i) => i !== vIdx);
+                                            updateStepField(index, 'vars', newVars);
+                                          }}
+                                        >
+                                          <Trash2 size={12} />
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div style={{ gridColumn: 'span 2', marginTop: '12px' }}>
+                                    <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>
+                                      Script JavaScript Dinâmico de Extração (Opcional - Retorna dados ou opções de selects da página)
+                                    </label>
+                                    <textarea
+                                      className="form-control"
+                                      rows={3}
+                                      style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                                      placeholder={`// Ex: (() => {\n//   const opts = Array.from(document.querySelectorAll('select#turma option')).map(o => ({ value: o.value, text: o.innerText.trim() }));\n//   return { options_for_turma_id: opts };\n// })()`}
+                                      value={step.dynamic_script || ''}
+                                      onChange={e => updateStepField(index, 'dynamic_script', e.target.value)}
                                     />
                                   </div>
                                 </>
@@ -2191,6 +2358,146 @@ export default function App() {
                 </div>
               )}
 
+              {/* ---------------- INTERACTIVE PROMPT CARD (HUMAN IN THE LOOP) ---------------- */}
+              {selectedLog.status === 'running' && (() => {
+                const promptStep = (selectedLog.stepsExecuted || []).find(s => s.status === 'running' && s.data && s.data.isUserPrompt && !s.data.completed);
+                if (!promptStep) return null;
+
+                const promptVars = promptStep.data.vars || [];
+                const dynamicData = promptStep.data.dynamicData;
+
+                return (
+                  <div className="card mb-24" style={{ border: '2px solid var(--color-primary)', background: 'rgba(59, 130, 246, 0.06)', padding: '20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                      <h4 style={{ margin: 0, fontSize: '16px', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <HelpCircle size={18} /> {promptStep.data.promptTitle || 'Preenchimento Interativo de Variáveis'}
+                      </h4>
+                      <span className="badge badge-warning" style={{ fontSize: '11px' }}>Aguardando Preenchimento</span>
+                    </div>
+
+                    {promptStep.data.promptDescription && (
+                      <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>
+                        {promptStep.data.promptDescription}
+                      </p>
+                    )}
+
+                    {/* Dynamic Extraction Data Info */}
+                    {dynamicData && !dynamicData.error && (
+                      <div style={{ marginBottom: '16px', padding: '10px 14px', background: 'rgba(0,0,0,0.3)', borderRadius: '6px', fontSize: '12px' }}>
+                        <div style={{ fontWeight: '600', color: 'var(--color-secondary)', marginBottom: '4px' }}>
+                          Opções Extraídas da Página em Tempo Real:
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                          {Object.entries(dynamicData).map(([key, val]) => {
+                            if (Array.isArray(val)) {
+                              return (
+                                <span key={key} style={{ fontSize: '11px', background: 'rgba(255,255,255,0.05)', padding: '2px 8px', borderRadius: '4px' }}>
+                                  {key}: {val.length} opções disponíveis
+                                </span>
+                              );
+                            }
+                            return null;
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <form onSubmit={async (e) => {
+                      e.preventDefault();
+                      setIsSubmittingPrompt(true);
+                      try {
+                        const finalValues = {};
+                        promptVars.forEach(v => {
+                          finalValues[v.name] = promptFormValues[v.name] !== undefined ? promptFormValues[v.name] : (v.value !== undefined ? v.value : v.defaultValue);
+                        });
+                        const res = await apiFetch('/api/interactive/submit', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ runId: selectedLog.id, values: finalValues })
+                        });
+                        if (!res.ok) {
+                          const err = await res.json();
+                          alert(`Falha ao enviar variáveis: ${err.error}`);
+                        } else {
+                          // Refetch logs immediately
+                          const freshLogs = await apiFetch('/api/logs').then(r => r.json());
+                          setLogs(freshLogs);
+                          const updated = freshLogs.find(l => l.id === selectedLog.id);
+                          if (updated) setSelectedLog(updated);
+                        }
+                      } catch (err) {
+                        alert(`Erro ao submeter: ${err.message}`);
+                      } finally {
+                        setIsSubmittingPrompt(false);
+                      }
+                    }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '20px' }}>
+                        {promptVars.map(v => {
+                          const currentValue = promptFormValues[v.name] !== undefined ? promptFormValues[v.name] : (v.value !== undefined ? v.value : v.defaultValue);
+                          
+                          // Check if dynamicData has options for this var
+                          const options = dynamicData?.[`options_for_${v.name}`] || dynamicData?.[v.name] || (Array.isArray(dynamicData) ? dynamicData : null);
+
+                          return (
+                            <div key={v.name} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              <label style={{ fontSize: '13px', fontWeight: '600', display: 'flex', justifyContent: 'space-between' }}>
+                                <span>{v.label || v.name}</span>
+                                <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{`{{param:${v.name}}}`}</span>
+                              </label>
+
+                              {Array.isArray(options) && options.length > 0 ? (
+                                <select
+                                  className="form-control"
+                                  value={currentValue}
+                                  onChange={e => {
+                                    const val = e.target.value;
+                                    setPromptFormValues(prev => ({ ...prev, [v.name]: val }));
+                                  }}
+                                  required
+                                >
+                                  <option value="">-- Selecione uma opção extraída da página --</option>
+                                  {options.map((opt, oIdx) => {
+                                    const optVal = typeof opt === 'object' ? (opt.value !== undefined ? opt.value : opt.text) : opt;
+                                    const optText = typeof opt === 'object' ? (opt.text !== undefined ? opt.text : opt.value) : opt;
+                                    return (
+                                      <option key={oIdx} value={optVal}>{optText}</option>
+                                    );
+                                  })}
+                                </select>
+                              ) : (
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  placeholder={`Valor padrão: "${v.defaultValue}"`}
+                                  value={currentValue || ''}
+                                  onChange={e => {
+                                    const val = e.target.value;
+                                    setPromptFormValues(prev => ({ ...prev, [v.name]: val }));
+                                  }}
+                                  required
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                        <button
+                          type="submit"
+                          className="btn btn-primary"
+                          disabled={isSubmittingPrompt}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+                        >
+                          {isSubmittingPrompt ? <RefreshCw className="spin" size={14} /> : <CheckCircle2 size={14} />}
+                          Confirmar e Continuar Execução
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                );
+              })()}
+
               {/* Steps timeline trace */}
               <h4 style={{ fontSize: '16px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>Histórico das Etapas Executadas</h4>
               
@@ -2492,6 +2799,51 @@ export default function App() {
                     </div>
                   );
                 })}
+
+                {/* Prompt variables configuration */}
+                {Object.keys(runTaskVars).length > 0 && (
+                  <div style={{ padding: '16px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                    <h4 style={{ fontSize: '14px', color: 'var(--color-primary)', fontWeight: '700', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <HelpCircle size={16} /> Variáveis de Prompt Interativo
+                    </h4>
+                    <p className="text-muted mb-16" style={{ fontSize: '11px' }}>
+                      Você pode preencher previamente as variáveis que serão solicitadas em tempo de execução. Se marcar para pular, o pipeline não pausará na etapa correspondente.
+                    </p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {Object.keys(runTaskVars).map(varName => (
+                        <div key={varName} style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '10px', background: 'rgba(0,0,0,0.2)', borderRadius: '6px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontWeight: '600', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
+                              {varName}
+                            </span>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', cursor: 'pointer', margin: 0 }}>
+                              <input
+                                type="checkbox"
+                                checked={!!runSkipVars[varName]}
+                                onChange={e => {
+                                  const isChecked = e.target.checked;
+                                  setRunSkipVars(prev => ({ ...prev, [varName]: isChecked }));
+                                }}
+                              />
+                              Pular pausa interativa desta variável
+                            </label>
+                          </div>
+                          <input
+                            type="text"
+                            className="form-control"
+                            style={{ fontSize: '12px', padding: '6px 10px' }}
+                            placeholder="Valor pré-definido"
+                            value={runTaskVars[varName] || ''}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setRunTaskVars(prev => ({ ...prev, [varName]: val }));
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
@@ -2516,7 +2868,8 @@ export default function App() {
                       }
                     });
 
-                    triggerTaskRun(execTask.id, cleanedOverrides);
+                    const cleanedSkipList = Object.entries(runSkipVars).filter(([_, isSkip]) => isSkip).map(([vName]) => vName);
+                    triggerTaskRun(execTask.id, cleanedOverrides, runTaskVars, cleanedSkipList);
                     setExecTask(null);
                   }}
                 >
