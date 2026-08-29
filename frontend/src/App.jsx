@@ -298,9 +298,6 @@ export default function App() {
 
   useEffect(() => {
     checkAuthStatus();
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
   }, []);
 
   useEffect(() => {
@@ -464,6 +461,9 @@ export default function App() {
   // Handle manual task run
   const triggerTaskRun = async (taskId, overrides = {}, runtimeVars = {}, skipVars = []) => {
     try {
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
       setRunningTasks(prev => new Set([...prev, taskId]));
       const response = await apiFetch(`/api/tasks/${taskId}/run`, {
         method: 'POST',
@@ -497,13 +497,17 @@ export default function App() {
 
   // Inspect task parameter configurations and prompt variables before triggering execution
   const handleStartTask = (taskObj) => {
-    const taskBlocksWithParams = (taskObj.blocks || []).filter(instance => {
-      const blockObj = blocks.find(b => b.id === instance.blockId);
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+
+    const taskBlocksWithParams = (taskObj.blocks || []).filter(inst => {
+      const blockObj = blocks.find(b => b.id === inst.blockId);
       return blockObj && blockObj.parameters && blockObj.parameters.length > 0;
     });
 
-    const taskBlocksWithPrompts = (taskObj.blocks || []).filter(instance => {
-      const blockObj = blocks.find(b => b.id === instance.blockId);
+    const taskBlocksWithPrompts = (taskObj.blocks || []).filter(inst => {
+      const blockObj = blocks.find(b => b.id === inst.blockId);
       return blockObj && blockObj.steps && blockObj.steps.some(s => s.type === 'user_prompt' && Array.isArray(s.vars) && s.vars.length > 0);
     });
 
@@ -516,21 +520,23 @@ export default function App() {
       const initialVars = {};
       const initialSkip = {};
       taskBlocksWithPrompts.forEach(inst => {
-        const blockObj = blocks.find(b => b.id === instance.blockId);
-        blockObj.steps.forEach(st => {
-          if (st.type === 'user_prompt' && Array.isArray(st.vars)) {
-            st.vars.forEach(v => {
-              if (v.name) {
-                if (initialVars[v.name] === undefined) {
-                  initialVars[v.name] = v.defaultValue || '';
+        const blockObj = blocks.find(b => b.id === inst.blockId);
+        if (blockObj && blockObj.steps) {
+          blockObj.steps.forEach(st => {
+            if (st.type === 'user_prompt' && Array.isArray(st.vars)) {
+              st.vars.forEach(v => {
+                if (v.name) {
+                  if (initialVars[v.name] === undefined) {
+                    initialVars[v.name] = v.defaultValue || '';
+                  }
+                  if (initialSkip[v.name] === undefined) {
+                    initialSkip[v.name] = false;
+                  }
                 }
-                if (initialSkip[v.name] === undefined) {
-                  initialSkip[v.name] = false;
-                }
-              }
-            });
-          }
-        });
+              });
+            }
+          });
+        }
       });
 
       setRunOverrides(initialOverrides);
