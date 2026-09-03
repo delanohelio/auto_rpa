@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { db } from './db/db.js';
 import { runTask, activeControlSessions, activePromptSessions } from './runner/engine.js';
-import { initScheduler, startSchedule, stopSchedule, isValidCron } from './scheduler/cron.js';
+import { initScheduler, startSchedule, stopSchedule, isValidCron, getNextRun } from './scheduler/cron.js';
 
 dotenv.config();
 
@@ -290,6 +290,37 @@ app.delete('/api/schedules/:id', (req, res) => {
     // De-register job
     stopSchedule(req.params.id);
     res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/schedules/:id/run', async (req, res) => {
+  try {
+    const schedule = db.getSchedule(req.params.id);
+    if (!schedule) return res.status(404).json({ error: 'Agendamento não encontrado' });
+
+    const task = db.getTask(schedule.taskId);
+    if (!task) return res.status(404).json({ error: `Pipeline vinculada (${schedule.taskId}) não encontrada` });
+
+    const { parameterOverrides = {}, runtimeVars = {}, skipVars = [] } = req.body;
+    console.log(`Manual execution requested for Schedule "${schedule.id}" (Task "${task.name}")`);
+
+    const runId = crypto.randomUUID();
+
+    // Update last run time in schedule
+    db.saveSchedule({
+      id: schedule.id,
+      lastRun: new Date().toISOString(),
+      nextRun: getNextRun(schedule.cronExpression)
+    });
+
+    // Execute asynchronously with trigger: 'schedule'
+    runTask(task.id, parameterOverrides, runId, runtimeVars, skipVars, 'schedule', schedule.id).catch(err => {
+      console.error(`Scheduled execution for task ${task.id} failed:`, err);
+    });
+
+    res.json({ message: 'Execução do agendamento iniciada', taskId: task.id, scheduleId: schedule.id, runId });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

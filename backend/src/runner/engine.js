@@ -136,17 +136,45 @@ async function triggerWebhook(url, payload) {
  * @param {Object} [parameterOverrides={}] - Execution-time overrides keyed by block instance ID
  * @returns {Promise<Object>} The run log record
  */
-export async function runTask(taskId, parameterOverrides = {}, runId = crypto.randomUUID(), runtimeVars = {}, skipVars = []) {
+export async function runTask(
+  taskId,
+  parameterOverrides = {},
+  runId = crypto.randomUUID(),
+  runtimeVars = {},
+  skipVars = [],
+  trigger = 'manual',
+  scheduleId = null
+) {
+  const startedAt = new Date().toISOString();
   const task = db.getTask(taskId);
   if (!task) {
-    throw new Error(`Task with ID ${taskId} not found`);
+    const errorRecord = {
+      id: runId,
+      taskId: taskId,
+      taskName: 'Pipeline Não Encontrada',
+      trigger,
+      scheduleId,
+      status: 'failure',
+      startedAt,
+      endedAt: startedAt,
+      duration: 0,
+      currentBlockId: null,
+      currentBlockName: null,
+      currentStepIndex: -1,
+      error: `A tarefa/pipeline com ID "${taskId}" não foi encontrada no banco de dados.`,
+      stepsExecuted: [],
+      screenshotPath: null
+    };
+    db.addLog(errorRecord);
+    throw new Error(errorRecord.error);
   }
-  const startedAt = new Date().toISOString();
-  
+
   const logRecord = {
     id: runId,
     taskId: task.id,
     taskName: task.name,
+    trigger,
+    scheduleId,
     status: 'running',
     startedAt,
     endedAt: null,
@@ -190,6 +218,8 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
       runId,
       taskId,
       taskName: task.name,
+      trigger,
+      scheduleId,
       startedAt
     }).catch(() => {});
   }
@@ -687,6 +717,8 @@ export async function runTask(taskId, parameterOverrides = {}, runId = crypto.ra
         runId,
         taskId,
         taskName: task.name,
+        trigger,
+        scheduleId,
         status: logRecord.status,
         startedAt,
         endedAt,

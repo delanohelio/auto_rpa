@@ -495,8 +495,41 @@ export default function App() {
     }
   };
 
+  // Handle scheduled task run
+  const triggerScheduleRun = async (scheduleId, overrides = {}, runtimeVars = {}, skipVars = []) => {
+    try {
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+      const response = await apiFetch(`/api/schedules/${scheduleId}/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parameterOverrides: overrides, runtimeVars, skipVars })
+      });
+      if (!response.ok) {
+        const errData = await response.json();
+        alert(`Falha ao iniciar agendamento: ${errData.error}`);
+      } else {
+        const resData = await response.json();
+        setActiveTab('logs');
+        try {
+          const freshLogs = await apiFetch('/api/logs').then(r => r.json());
+          setLogs(freshLogs);
+          const newLog = freshLogs.find(l => l.id === resData.runId);
+          if (newLog) {
+            setSelectedLog(newLog);
+          }
+        } catch (e) {
+          console.error('Failed to auto-open log modal:', e);
+        }
+      }
+    } catch (err) {
+      alert(`Erro de conexão: ${err.message}`);
+    }
+  };
+
   // Inspect task parameter configurations and prompt variables before triggering execution
-  const handleStartTask = (taskObj) => {
+  const handleStartTask = (taskObj, scheduleId = null) => {
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().catch(() => {});
     }
@@ -542,10 +575,22 @@ export default function App() {
       setRunOverrides(initialOverrides);
       setRunTaskVars(initialVars);
       setRunSkipVars(initialSkip);
-      setExecTask(taskObj);
+      setExecTask({ ...taskObj, scheduleId });
     } else {
-      triggerTaskRun(taskObj.id);
+      if (scheduleId) {
+        triggerScheduleRun(scheduleId);
+      } else {
+        triggerTaskRun(taskObj.id);
+      }
     }
+  };
+
+  const handleStartSchedule = (sched) => {
+    const taskObj = tasks.find(t => t.id === sched.taskId);
+    if (!taskObj) {
+      return alert('A pipeline vinculada a este agendamento não foi encontrada.');
+    }
+    handleStartTask(taskObj, sched.id);
   };
 
   // Blocks Actions
@@ -2242,9 +2287,19 @@ export default function App() {
                                 </label>
                               </td>
                               <td style={{ padding: '12px 8px', textAlign: 'right' }}>
-                                <button className="btn btn-danger btn-sm" onClick={() => handleDeleteSchedule(s.id)}>
-                                  <Trash2 size={12} />
-                                </button>
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end' }}>
+                                  <button
+                                    className="btn btn-secondary btn-sm"
+                                    title="Executar pipeline deste agendamento agora"
+                                    onClick={() => handleStartSchedule(s)}
+                                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  >
+                                    <Play size={12} /> Executar
+                                  </button>
+                                  <button className="btn btn-danger btn-sm" title="Excluir agendamento" onClick={() => handleDeleteSchedule(s.id)}>
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           );
@@ -2295,7 +2350,20 @@ export default function App() {
                     <tbody>
                       {logs.map(l => (
                         <tr key={l.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                          <td style={{ padding: '16px 8px', fontWeight: '600' }}>{l.taskName}</td>
+                          <td style={{ padding: '16px 8px', fontWeight: '600' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              <span>{l.taskName}</span>
+                              {l.trigger === 'schedule' ? (
+                                <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 6px' }}>
+                                  <Clock size={10} /> Agendado
+                                </span>
+                              ) : (
+                                <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)', border: '1px solid var(--border-color)', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 6px' }}>
+                                  <Play size={10} /> Manual
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td style={{ padding: '16px 8px', color: 'var(--text-muted)' }}>
                             {new Date(l.startedAt).toLocaleString('pt-BR')}
                           </td>
@@ -2341,14 +2409,28 @@ export default function App() {
                   </span>
                 </div>
                 <div className="card" style={{ padding: '16px' }}>
+                  <p className="stat-title">Origem do Disparo</p>
+                  <div style={{ marginTop: '6px' }}>
+                    {selectedLog.trigger === 'schedule' ? (
+                      <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 8px' }}>
+                        <Clock size={12} /> Agendado (Cron)
+                      </span>
+                    ) : (
+                      <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)', border: '1px solid var(--border-color)', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 8px' }}>
+                        <Play size={12} /> Manual
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="card" style={{ padding: '16px' }}>
                   <p className="stat-title">Duração</p>
-                  <p style={{ fontSize: '20px', fontWeight: '700', marginTop: '4px' }}>
+                  <p style={{ fontSize: '18px', fontWeight: '700', marginTop: '4px' }}>
                     {selectedLog.status === 'running' ? 'Executando...' : `${selectedLog.duration} segundos`}
                   </p>
                 </div>
-                <div className="card" style={{ padding: '16px', gridColumn: 'span 2' }}>
+                <div className="card" style={{ padding: '16px' }}>
                   <p className="stat-title">Período de Execução</p>
-                  <p style={{ fontSize: '13px', marginTop: '4px', color: 'var(--text-muted)' }}>
+                  <p style={{ fontSize: '12px', marginTop: '4px', color: 'var(--text-muted)', lineHeight: '1.4' }}>
                     Início: {new Date(selectedLog.startedAt).toLocaleString('pt-BR')} <br/>
                     Fim: {selectedLog.endedAt ? new Date(selectedLog.endedAt).toLocaleString('pt-BR') : '-'}
                   </p>
@@ -2875,7 +2957,11 @@ export default function App() {
                     });
 
                     const cleanedSkipList = Object.entries(runSkipVars).filter(([_, isSkip]) => isSkip).map(([vName]) => vName);
-                    triggerTaskRun(execTask.id, cleanedOverrides, runTaskVars, cleanedSkipList);
+                    if (execTask.scheduleId) {
+                      triggerScheduleRun(execTask.scheduleId, cleanedOverrides, runTaskVars, cleanedSkipList);
+                    } else {
+                      triggerTaskRun(execTask.id, cleanedOverrides, runTaskVars, cleanedSkipList);
+                    }
                     setExecTask(null);
                   }}
                 >

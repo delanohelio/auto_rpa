@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import parser from 'cron-parser';
+import crypto from 'crypto';
 import { db } from '../db/db.js';
 import { runTask } from '../runner/engine.js';
 
@@ -63,9 +64,11 @@ export function startSchedule(sched) {
       nextRun
     });
 
+    const runId = crypto.randomUUID();
+
     try {
-      // Execute the task in the background
-      await runTask(sched.taskId);
+      // Execute the task in the background with schedule trigger metadata
+      await runTask(sched.taskId, {}, runId, {}, [], 'schedule', sched.id);
     } catch (err) {
       console.error(`Error running scheduled task ${sched.taskId}:`, err.message);
     }

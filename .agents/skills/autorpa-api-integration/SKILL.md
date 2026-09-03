@@ -485,3 +485,10 @@ A etapa `user_prompt` permite pausar a execução da pipeline para que um humano
   - `POST /api/interactive/submit`: Submete `{ "runId": "...", "values": { "curso_id": "102", "nome_aluno": "Maria" } }` para destravar e continuar o pipeline.
 - **Etapa `wait` com Timeout Configurável**: O passo `wait` agora aceita o parâmetro `"timeout": 30` (em segundos), vindo pré-preenchido com 30s por padrão.
 
+### 9. Execuções Agendadas e Histórico nos Logs
+Toda execução de pipeline disparada a partir do agendador (seja automaticamente via expressão Cron ou manualmente pelo botão "Executar Agora" na aba de Agendamentos / endpoint `POST /api/schedules/:id/run`):
+- Registra seu histórico de execução em tempo real na listagem de logs (`db.logs`), acessível pela aba de Logs de Execução.
+- Armazena metadados de origem: `"trigger": "schedule"` e `"scheduleId": "<id-do-agendamento>"`.
+- Na interface, as execuções agendadas recebem a identificação visual com badge `Agendado` (e ícone de relógio), diferenciando-se das execuções `Manual`.
+- Permite execução imediata de um agendamento diretamente via API: `POST /api/schedules/:id/run` com corpo opcional `{ parameterOverrides, runtimeVars, skipVars }`.
+

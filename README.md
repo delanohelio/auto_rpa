@@ -194,4 +194,9 @@ Todas as etapas de ação que interagem com o DOM suportam seleção por XPath:
 - **Pulo no Disparo**: Ao iniciar uma pipeline, o usuário pode pré-preencher as variáveis e marcar quais deseja pular. Se todas as variáveis daquela etapa forem marcadas para pular, a pipeline não pausa e usa os valores fornecidos.
 - **Tempo Limite em `wait`**: A ação de espera (`wait`) agora possui campo para configurar o tempo limite em segundos (com padrão pré-preenchido de 30s).
 
+### 9. Histórico de Execuções do Agendador (Cron e Manual)
+- **Rastreabilidade Completa**: Todas as execuções iniciadas pelo agendador (seja por disparo do cron ou pelo botão "Executar Agora" na aba de agendamentos) registram seu histórico completo na tela de Logs.
+- **Identificação da Origem**: Cada log armazena e exibe a tag `Agendado` ou `Manual`, além de vincular o ID do agendamento correspondente.
+- **Acompanhamento Imediato**: Clicar em "Executar Agora" em qualquer agendamento inicia a tarefa e direciona o usuário imediatamente para a tela de logs com atualização em tempo real.
+
 
