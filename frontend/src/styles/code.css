@@ -1,0 +1,299 @@
+/* Code Presentation & Syntax Highlighting Tokens for AutoRPA 2.0 */
+
+.code-container {
+  background-color: var(--bg-code);
+  border: 1px solid var(--border-code);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  position: relative;
+  font-family: var(--font-mono);
+  box-shadow: var(--shadow-sm);
+  transition: var(--transition-fast);
+}
+
+.code-container:hover {
+  border-color: var(--border-color-hover);
+}
+
+.code-container.has-error {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 12px var(--color-danger-bg);
+}
+
+.code-container.is-valid {
+  border-color: var(--color-success-border);
+}
+
+/* Code Header / Toolbar */
+.code-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background-color: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border-code);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.code-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.code-lang-badge {
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.code-validation-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: var(--transition-fast);
+}
+
+.code-validation-badge.valid {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border: 1px solid var(--color-success-border);
+}
+
+.code-validation-badge.invalid {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger-border);
+}
+
+.code-validation-badge.neutral {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+}
+
+.code-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-action-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: var(--transition-fast);
+}
+
+.code-action-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.code-action-btn.active {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+/* Syntax Validation Alert Banner */
+.code-error-banner {
+  background: var(--color-danger-bg);
+  border-top: 1px solid var(--color-danger-border);
+  color: var(--color-danger);
+  font-size: 12px;
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+}
+
+/* Code Snippets Dropdown / Quick Bar */
+.code-snippets-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid var(--border-code);
+  overflow-x: auto;
+}
+
+.code-snippet-chip {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: var(--transition-fast);
+}
+
+.code-snippet-chip:hover {
+  background: var(--color-primary-glow);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+/* Prism Editor & Viewer Wrapper */
+.code-content-wrapper {
+  position: relative;
+  max-height: 450px;
+  overflow: auto;
+}
+
+.code-viewer-pre {
+  margin: 0;
+  padding: 14px 16px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  tab-size: 2;
+  color: var(--text-main);
+  background: transparent !important;
+  white-space: pre;
+  word-spacing: normal;
+  word-break: normal;
+}
+
+/* Editable Textarea Sync */
+.code-editor-wrapper {
+  position: relative;
+  min-height: 140px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.code-editor-textarea {
+  width: 100%;
+  min-height: 140px;
+  padding: 14px 16px;
+  margin: 0;
+  background-color: var(--bg-code);
+  color: var(--text-main);
+  border: none;
+  outline: none;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  tab-size: 2;
+  box-sizing: border-box;
+}
+
+.code-editor-textarea:focus {
+  outline: none;
+}
+
+/* Prism Tokens Styling */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+
+.token.punctuation {
+  color: var(--syntax-operator);
+}
+
+.token.property,
+.token.tag,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  color: var(--syntax-tag);
+}
+
+.token.boolean,
+.token.number {
+  color: var(--syntax-number);
+}
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+  color: var(--syntax-string);
+}
+
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  color: var(--syntax-operator);
+}
+
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: var(--syntax-keyword);
+  font-weight: 600;
+}
+
+.token.function,
+.token.class-name {
+  color: var(--syntax-function);
+}
+
+.token.regex,
+.token.important,
+.token.variable {
+  color: var(--color-warning);
+}
+
+/* JSON Tree Viewer */
+.json-viewer-container {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.json-key {
+  color: var(--syntax-function);
+}
+
+.json-string {
+  color: var(--syntax-string);
+}
+
+.json-number {
+  color: var(--syntax-number);
+}
+
+.json-boolean {
+  color: var(--syntax-boolean);
+  font-weight: bold;
+}
+
+.json-null {
+  color: var(--syntax-comment);
+  font-style: italic;
+}

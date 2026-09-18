@@ -279,10 +279,99 @@ export const db = {
   },
 
   // Logs
-  getLogs() {
+  getLogs(options = {}) {
     const data = readDB();
-    // Return logs sorted by start date descending (newest first)
-    return data.logs.sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
+    let logs = (data.logs || []).slice().sort((a, b) => new Date(b.startedAt || b.createdAt) - new Date(a.startedAt || a.createdAt));
+
+    // If options are provided with filters or pagination
+    if (options.status) {
+      logs = logs.filter(l => l.status === options.status);
+    }
+    if (options.trigger) {
+      logs = logs.filter(l => l.trigger === options.trigger);
+    }
+    if (options.search) {
+      const q = options.search.toLowerCase().trim();
+      logs = logs.filter(l => 
+        (l.taskName && l.taskName.toLowerCase().includes(q)) ||
+        (l.id && l.id.toLowerCase().includes(q)) ||
+        (l.error && l.error.toLowerCase().includes(q))
+      );
+    }
+
+    const total = logs.length;
+
+    // Check if summary projection is requested
+    if (options.summary) {
+      logs = logs.map(l => {
+        const { stepsExecuted, ...rest } = l;
+        return {
+          ...rest,
+          stepsCount: Array.isArray(stepsExecuted) ? stepsExecuted.length : 0
+        };
+      });
+    }
+
+    if (options.page || options.limit) {
+      const page = Math.max(1, parseInt(options.page, 10) || 1);
+      const limit = Math.max(1, parseInt(options.limit, 10) || 20);
+      const totalPages = Math.ceil(total / limit) || 1;
+      const startIndex = (page - 1) * limit;
+      const paginatedLogs = logs.slice(startIndex, startIndex + limit);
+
+      return {
+        logs: paginatedLogs,
+        total,
+        page,
+        limit,
+        totalPages
+      };
+    }
+
+    return logs;
+  },
+
+  getStats() {
+    const data = readDB();
+    const logs = data.logs || [];
+    const tasks = data.tasks || [];
+    const blocks = data.blocks || [];
+    const schedules = data.schedules || [];
+
+    const totalRuns = logs.length;
+    let successCount = 0;
+    let failureCount = 0;
+    let runningCount = 0;
+    let totalDuration = 0;
+    let durationCount = 0;
+
+    for (const log of logs) {
+      if (log.status === 'success') successCount++;
+      else if (log.status === 'failure') failureCount++;
+      else if (log.status === 'running') runningCount++;
+
+      if (log.duration !== undefined && log.duration !== null && log.status !== 'running') {
+        totalDuration += Number(log.duration) || 0;
+        durationCount++;
+      }
+    }
+
+    const resolvedRuns = successCount + failureCount;
+    const successRate = resolvedRuns > 0 ? Math.round((successCount / resolvedRuns) * 100) : 100;
+    const averageDurationSeconds = durationCount > 0 ? Math.round((totalDuration / durationCount) * 10) / 10 : 0;
+    const activeSchedules = schedules.filter(s => s.enabled).length;
+
+    return {
+      totalRuns,
+      successCount,
+      failureCount,
+      runningCount,
+      successRate,
+      totalTasks: tasks.length,
+      totalBlocks: blocks.length,
+      activeSchedules,
+      averageDurationSeconds
+    };
   },
 
   getLog(id) {

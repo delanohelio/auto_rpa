@@ -71,6 +71,15 @@ app.get('/api/system/settings', (req, res) => {
   }
 });
 
+app.get('/api/system/stats', (req, res) => {
+  try {
+    const stats = db.getStats();
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/system/settings', (req, res) => {
   try {
     const saved = db.saveSettings(req.body);
@@ -326,11 +335,59 @@ app.post('/api/schedules/:id/run', async (req, res) => {
   }
 });
 
-// 4. Logs API
-app.get('/api/logs', (req, res) => {
+// 4. Logs & Runs Active Monitoring API
+app.get('/api/runs/active', (req, res) => {
   try {
     const logs = db.getLogs();
-    res.json(logs);
+    const runningLogs = logs.filter(l => l.status === 'running');
+    
+    const activeRuns = runningLogs.map(l => {
+      const isAgentWaiting = activeControlSessions.has(l.id);
+      const isPromptWaiting = activePromptSessions.has(l.id);
+      const promptSession = isPromptWaiting ? activePromptSessions.get(l.id) : null;
+
+      return {
+        runId: l.id,
+        taskId: l.taskId,
+        taskName: l.taskName,
+        status: 'running',
+        startedAt: l.startedAt,
+        stepIndex: (l.stepsExecuted?.length || 1) - 1,
+        waitingForAgent: isAgentWaiting,
+        waitingForPrompt: isPromptWaiting,
+        promptTitle: promptSession?.promptTitle || null,
+        promptDescription: promptSession?.promptDescription || null
+      };
+    });
+
+    res.json(activeRuns);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/logs', (req, res) => {
+  try {
+    const { page, limit, status, trigger, search, summary } = req.query;
+    const logsResult = db.getLogs({
+      page,
+      limit,
+      status,
+      trigger,
+      search,
+      summary: summary === 'true'
+    });
+    res.json(logsResult);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/logs/:id', (req, res) => {
+  try {
+    const log = db.getLog(req.params.id);
+    if (!log) return res.status(404).json({ error: 'Log não encontrado' });
+    res.json(log);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
