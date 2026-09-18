@@ -479,20 +479,66 @@ export async function runTask(
               if (!script) throw new Error("O script da etapa 'eval' não foi fornecido.");
               console.log(`Evaluating script: ${script.substring(0, 60)}...`);
               const output = await page.evaluate(script);
-              stepLog.data = { result: output };
 
-              if (step.output_file) {
-                const resolvedFilename = resolveText(step.output_file, decryptedSecrets, mergedParams);
-                const safeFilename = path.basename(resolvedFilename);
-                const uniqueFilename = `download_${runId}_${safeFilename}`;
-                const filePath = path.join(DOWNLOADS_DIR, uniqueFilename);
+              console.log(`[JSEval] Return value:`, typeof output === 'object' ? JSON.stringify(output) : output);
 
-                console.log(`Writing eval output to file: ${filePath}`);
-                const fileContent = typeof output === 'string' ? output : JSON.stringify(output, null, 2);
-                fs.writeFileSync(filePath, fileContent, 'utf-8');
+              // Step data with explicit return value
+              stepLog.data = {
+                result: output !== undefined ? output : null,
+                returnValue: output !== undefined ? output : null,
+                hasOutput: output !== undefined,
+                message: output !== undefined
+                  ? (typeof output === 'object' && output !== null
+                      ? `Retorno capturado (${Array.isArray(output) ? `${output.length} itens` : 'Objeto'}).`
+                      : `Retorno: ${String(output).substring(0, 150)}${String(output).length > 150 ? '...' : ''}`)
+                  : 'Script JS executado com sucesso (sem retorno explícito).'
+              };
 
-                stepLog.downloadPath = `/downloads/${uniqueFilename}`;
-                stepLog.downloadName = safeFilename;
+              // If output_file is configured, persist the return value to disk and download area
+              const rawOutputFile = (step.output_file || '').trim();
+              if (rawOutputFile) {
+                const resolvedFilename = resolveText(rawOutputFile, decryptedSecrets, mergedParams).trim();
+                if (resolvedFilename) {
+                  const safeFilename = path.basename(resolvedFilename);
+                  const uniqueFilename = `download_${runId}_${safeFilename}`;
+                  const filePath = path.join(DOWNLOADS_DIR, uniqueFilename);
+
+                  console.log(`[JSEval] Writing return value to download file: ${filePath}`);
+                  let fileContent = '';
+                  if (typeof output === 'string') {
+                    fileContent = output;
+                  } else if (output !== undefined && output !== null) {
+                    fileContent = typeof output === 'object' ? JSON.stringify(output, null, 2) : String(output);
+                  } else {
+                    fileContent = '';
+                  }
+
+                  if (!fs.existsSync(DOWNLOADS_DIR)) {
+                    fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
+                  }
+                  fs.writeFileSync(filePath, fileContent, 'utf-8');
+
+                  // Also save directly to relative or absolute path in workspace
+                  try {
+                    const directPath = path.isAbsolute(resolvedFilename)
+                      ? resolvedFilename
+                      : path.resolve(process.cwd(), resolvedFilename);
+                    const directDir = path.dirname(directPath);
+                    if (!fs.existsSync(directDir)) {
+                      fs.mkdirSync(directDir, { recursive: true });
+                    }
+                    fs.writeFileSync(directPath, fileContent, 'utf-8');
+                    console.log(`[JSEval] Also saved output directly to: ${directPath}`);
+                    stepLog.data.savedFilePath = directPath;
+                  } catch (directErr) {
+                    console.warn(`[JSEval] Note: Could not save direct file to ${resolvedFilename}:`, directErr.message);
+                  }
+
+                  stepLog.downloadPath = `/downloads/${uniqueFilename}`;
+                  stepLog.downloadName = safeFilename;
+                  stepLog.data.outputFile = safeFilename;
+                  stepLog.data.fileSize = Buffer.byteLength(fileContent, 'utf-8');
+                }
               }
               break;
             }

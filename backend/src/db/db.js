@@ -100,8 +100,9 @@ export const db = {
     if (blockData.secrets) {
       for (const [key, val] of Object.entries(blockData.secrets)) {
         if (val === '********') {
-          // Keep existing encrypted value
-          finalSecrets[key] = oldBlock?.secrets?.[key] || '';
+          // Keep existing encrypted value, checking if renamed from previous key
+          const originalOldKey = blockData.secretKeyRenames?.[key] || key;
+          finalSecrets[key] = oldBlock?.secrets?.[originalOldKey] || oldBlock?.secrets?.[key] || '';
         } else if (val) {
           // Encrypt new value
           finalSecrets[key] = encrypt(val);

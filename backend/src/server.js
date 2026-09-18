@@ -170,10 +170,10 @@ app.get('/api/blocks/:id', (req, res) => {
 
 app.post('/api/blocks', (req, res) => {
   try {
-    const { id, name, description, steps, secrets, parameters } = req.body;
+    const { id, name, description, steps, secrets, parameters, secretKeyRenames } = req.body;
     if (!name) return res.status(400).json({ error: 'Block name is required' });
     
-    const saved = db.saveBlock({ id, name, description, steps, secrets, parameters });
+    const saved = db.saveBlock({ id, name, description, steps, secrets, parameters, secretKeyRenames });
     res.json(saved);
   } catch (error) {
     res.status(500).json({ error: error.message });

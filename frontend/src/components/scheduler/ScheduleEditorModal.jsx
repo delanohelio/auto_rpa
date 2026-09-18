@@ -37,81 +37,86 @@ export default function ScheduleEditorModal({ schedule, onSave, onClose }) {
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1100 }}>
-      <div className="modal-content" style={{ maxWidth: '600px' }} onClick={e => e.stopPropagation()}>
-        <XCircle className="modal-close" size={24} onClick={onClose} />
+      <div className="modal-content" style={{ maxWidth: '640px' }} onClick={e => e.stopPropagation()}>
+        {/* Fixed Header */}
+        <div className="modal-header">
+          <h3 className="modal-title">
+            {editingSchedule.id ? 'Editar Agendamento Cron' : 'Novo Agendamento Periódico'}
+          </h3>
+          <XCircle className="modal-close" size={24} onClick={onClose} />
+        </div>
 
-        <h3 className="modal-title">
-          {editingSchedule.id ? 'Editar Agendamento Cron' : 'Novo Agendamento Periódico'}
-        </h3>
+        {/* Scrollable Form */}
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          <div className="modal-body">
+            {/* Target Pipeline Selection */}
+            <div className="form-group">
+              <label>Pipeline Alvo *</label>
+              <select
+                className="form-control"
+                value={editingSchedule.taskId}
+                onChange={e => setEditingSchedule({ ...editingSchedule, taskId: e.target.value })}
+                required
+              >
+                <option value="">-- Selecione uma pipeline --</option>
+                {tasks.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} ({t.blocks?.length || 0} blocos)
+                  </option>
+                ))}
+              </select>
+            </div>
 
-        <form onSubmit={handleSubmit}>
-          {/* Target Pipeline Selection */}
-          <div className="form-group">
-            <label>Pipeline Alvo *</label>
-            <select
-              className="form-control"
-              value={editingSchedule.taskId}
-              onChange={e => setEditingSchedule({ ...editingSchedule, taskId: e.target.value })}
-              required
-            >
-              <option value="">-- Selecione uma pipeline --</option>
-              {tasks.map(t => (
-                <option key={t.id} value={t.id}>
-                  {t.name} ({t.blocks?.length || 0} blocos)
-                </option>
-              ))}
-            </select>
-          </div>
+            {/* Cron Expression Presets */}
+            <div className="form-group">
+              <label>Modelos Rápidos de Recorrência</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {cronPresets.map((preset, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className={`btn btn-sm ${editingSchedule.cronExpression === preset.expr ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setEditingSchedule({ ...editingSchedule, cronExpression: preset.expr })}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-          {/* Cron Expression Presets */}
-          <div className="form-group">
-            <label>Modelos Rápidos de Recorrência</label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-              {cronPresets.map((preset, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  className={`btn btn-sm ${editingSchedule.cronExpression === preset.expr ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setEditingSchedule({ ...editingSchedule, cronExpression: preset.expr })}
-                >
-                  {preset.label}
-                </button>
-              ))}
+            {/* Custom Cron Expression Input */}
+            <div className="form-group">
+              <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Expressão Cron Personalizada *</span>
+                <span style={{ fontSize: '11px', color: 'var(--text-dark)' }}>minuto hora dia mês dia_semana</span>
+              </label>
+              <input
+                type="text"
+                className="form-control"
+                style={{ fontFamily: 'var(--font-mono)', fontSize: '14px' }}
+                placeholder="*/30 * * * *"
+                value={editingSchedule.cronExpression}
+                onChange={e => setEditingSchedule({ ...editingSchedule, cronExpression: e.target.value })}
+                required
+              />
+            </div>
+
+            {/* Enabled Checkbox */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={editingSchedule.enabled !== false}
+                  onChange={e => setEditingSchedule({ ...editingSchedule, enabled: e.target.checked })}
+                  style={{ width: '16px', height: '16px' }}
+                />
+                <span style={{ fontSize: '13px', fontWeight: 600 }}>Ativar agendamento imediatamente</span>
+              </label>
             </div>
           </div>
 
-          {/* Custom Cron Expression Input */}
-          <div className="form-group">
-            <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>Expressão Cron Personalizada *</span>
-              <span style={{ fontSize: '11px', color: 'var(--text-dark)' }}>minuto hora dia mês dia_semana</span>
-            </label>
-            <input
-              type="text"
-              className="form-control"
-              style={{ fontFamily: 'var(--font-mono)', fontSize: '14px' }}
-              placeholder="*/30 * * * *"
-              value={editingSchedule.cronExpression}
-              onChange={e => setEditingSchedule({ ...editingSchedule, cronExpression: e.target.value })}
-              required
-            />
-          </div>
-
-          {/* Enabled Checkbox */}
-          <div className="form-group">
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0 }}>
-              <input
-                type="checkbox"
-                checked={editingSchedule.enabled !== false}
-                onChange={e => setEditingSchedule({ ...editingSchedule, enabled: e.target.checked })}
-                style={{ width: '16px', height: '16px' }}
-              />
-              <span style={{ fontSize: '13px', fontWeight: 600 }}>Ativar agendamento imediatamente</span>
-            </label>
-          </div>
-
-          {/* Action Buttons */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+          {/* Fixed Footer */}
+          <div className="modal-footer">
             <button type="button" className="btn btn-secondary" onClick={onClose}>
               Cancelar
             </button>

@@ -50,15 +50,18 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1150 }}>
-      <div className="modal-content" style={{ maxWidth: '650px' }} onClick={e => e.stopPropagation()}>
-        <XCircle className="modal-close" size={24} onClick={onClose} />
+      <div className="modal-content" style={{ maxWidth: '680px' }} onClick={e => e.stopPropagation()}>
+        {/* Fixed Header */}
+        <div className="modal-header">
+          <h3 className="modal-title">Configurar Execução: {task.name}</h3>
+          <XCircle className="modal-close" size={24} onClick={onClose} />
+          <p className="text-muted" style={{ fontSize: '13px', margin: '8px 0 0' }}>
+            Defina valores temporários para os parâmetros desta rodada. Se deixados em branco, o sistema usará as configurações padrão da pipeline.
+          </p>
+        </div>
 
-        <h3 className="modal-title">Configurar Execução: {task.name}</h3>
-        <p className="text-muted mb-24" style={{ fontSize: '13px' }}>
-          Defina valores temporários para os parâmetros desta rodada. Se deixados em branco, o sistema usará as configurações padrão da pipeline.
-        </p>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '50vh', overflowY: 'auto', paddingRight: '4px', marginBottom: '24px' }}>
+        {/* Scrollable Body */}
+        <div className="modal-body">
           {/* Blocks parameters override */}
           {(task.blocks || []).map((instance, index) => {
             const block = blocks.find(b => b.id === instance.blockId);
@@ -170,7 +173,8 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
           )}
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+        {/* Fixed Footer */}
+        <div className="modal-footer">
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             Cancelar
           </button>
