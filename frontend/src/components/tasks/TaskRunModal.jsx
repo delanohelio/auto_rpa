@@ -55,7 +55,7 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
       .map(([vName]) => vName);
 
     onStartRun(cleanedOverrides, runTaskVars, cleanedSkipList, {
-      headless: hasManualInteraction ? false : (browserMode === 'headless'),
+      headless: browserMode === 'headless',
       liveView
     });
     onClose();
@@ -106,19 +106,16 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
                     borderRadius: '6px',
                     background: browserMode === 'headless' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(255, 255, 255, 0.05)',
                     border: browserMode === 'headless' ? '1px solid var(--color-primary)' : '1px solid var(--border-color)',
-                    cursor: hasManualInteraction ? 'not-allowed' : 'pointer',
-                    opacity: hasManualInteraction ? 0.4 : 1,
+                    cursor: 'pointer',
                     color: browserMode === 'headless' ? '#93c5fd' : 'var(--text-muted)'
                   }}
-                  title={hasManualInteraction ? 'Desabilitado: esta pipeline possui ação de Interação Manual e requer janela visual' : undefined}
                 >
                   <input
                     type="radio"
                     name="browserMode"
                     value="headless"
-                    disabled={hasManualInteraction}
                     checked={browserMode === 'headless'}
-                    onChange={() => !hasManualInteraction && setBrowserMode('headless')}
+                    onChange={() => setBrowserMode('headless')}
                     style={{ margin: 0 }}
                   />
                   Headless (Segundo Plano)
@@ -155,7 +152,7 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
               <div style={{ fontSize: '11px', color: '#facc15', background: 'rgba(234, 179, 8, 0.1)', padding: '8px 12px', borderRadius: '6px', border: '1px solid rgba(234, 179, 8, 0.25)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '13px' }}>💡</span>
                 <span>
-                  Esta pipeline contém uma ação de <strong>Interação Manual</strong>. O modo visual (Headed com janela aberta na sua tela) é obrigatório para você interagir com a página.
+                  Esta pipeline contém uma ação de <strong>Interação Manual</strong>. O modo visual (Headed) é recomendado para interação física. Em ambientes de servidor/Docker sem display X11, o AutoRPA utiliza automaticamente Xvfb ou LiveView sem travar a execução.
                 </span>
               </div>
             )}

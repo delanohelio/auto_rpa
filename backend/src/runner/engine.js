@@ -4,6 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { db } from '../db/db.js';
 import { decrypt } from '../utils/crypto.js';
+import { ensureDisplayServer, isX11LaunchError } from '../utils/display.js';
 
 import { fileURLToPath } from 'url';
 
@@ -224,9 +225,19 @@ export async function runTask(
     : true;
 
   if (hasManualInteraction) {
-    console.log(`[Engine] Pipeline "${task.name}" contém ação de Interação Manual (manual_interaction). Forçando execução em modo Visual (Headed: true).`);
+    console.log(`[Engine] Pipeline "${task.name}" contém ação de Interação Manual (manual_interaction). Solicitando modo Visual (Headed: true).`);
     isHeadless = false;
     isLiveView = true;
+  }
+
+  // If headed mode is requested, ensure an X11 display server or Xvfb exists on Linux
+  if (!isHeadless) {
+    const hasDisplay = ensureDisplayServer();
+    if (!hasDisplay) {
+      console.warn(`[Engine] Aviso: Execução em modo Visual (Headed) solicitada para "${task.name}", mas o ambiente não possui XServer ($DISPLAY) nem Xvfb instalado. Alternando automaticamente para modo Headless com LiveView.`);
+      isHeadless = true;
+      isLiveView = true;
+    }
   }
 
   const logRecord = {
@@ -282,11 +293,28 @@ export async function runTask(
       launchArgs.push('--disable-blink-features=AutomationControlled');
     }
 
-    // Launch chromium with user-selected headless mode
-    browser = await chromium.launch({
-      headless: isHeadless,
-      args: launchArgs
-    });
+    // Launch chromium with user-selected headless mode (with automatic fallback if XServer is missing)
+    try {
+      browser = await chromium.launch({
+        headless: isHeadless,
+        args: launchArgs
+      });
+    } catch (launchErr) {
+      if (!isHeadless && isX11LaunchError(launchErr)) {
+        console.warn(`[Engine] Falha ao iniciar navegador Headed sem display X11 (${launchErr.message.split('\n')[0]}). Alternando automaticamente para Headless com LiveView...`);
+        isHeadless = true;
+        isLiveView = true;
+        logRecord.headless = true;
+        logRecord.liveView = true;
+        db.addLog(logRecord);
+        browser = await chromium.launch({
+          headless: true,
+          args: launchArgs
+        });
+      } else {
+        throw launchErr;
+      }
+    }
 
     const contextOptions = {
       viewport: { width: 1280, height: 720 }
@@ -808,6 +836,10 @@ export async function runTask(
                 isManualInteraction: true,
                 instruction,
                 timeoutSec,
+                isHeadless,
+                note: isHeadless
+                  ? 'Aviso: Esta execução está rodando em ambiente sem servidor gráfico físico ($DISPLAY). Acompanhe o navegador pelo LiveView no painel e clique em Continuar para prosseguir.'
+                  : null,
                 startedAt: new Date().toISOString()
               };
               db.addLog(logRecord); // Update log immediately so frontend displays the manual interaction card

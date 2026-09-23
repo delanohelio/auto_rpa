@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { getPlaywrightSelector, resolveText } from './engine.js';
 import { db } from '../db/db.js';
 import { decrypt } from '../utils/crypto.js';
+import { ensureDisplayServer, isX11LaunchError } from '../utils/display.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -66,6 +67,14 @@ class SandboxManager {
       this.headless = Boolean(headless);
       this.activeSessionId = `sandbox_${Date.now()}`;
 
+      if (!this.headless) {
+        const hasDisplay = ensureDisplayServer();
+        if (!hasDisplay) {
+          console.warn('[Sandbox] Ambiente sem display X11/Wayland detectado. Alternando automaticamente para modo headless.');
+          this.headless = true;
+        }
+      }
+
       console.log(`[Sandbox] Launching Chromium (headless: ${this.headless})...`);
 
       const launchArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'];
@@ -73,10 +82,23 @@ class SandboxManager {
         launchArgs.push('--disable-blink-features=AutomationControlled');
       }
 
-      this.browser = await chromium.launch({
-        headless: this.headless,
-        args: launchArgs
-      });
+      try {
+        this.browser = await chromium.launch({
+          headless: this.headless,
+          args: launchArgs
+        });
+      } catch (launchErr) {
+        if (!this.headless && isX11LaunchError(launchErr)) {
+          console.warn(`[Sandbox] Falha ao iniciar modo Headed sem display X11 (${launchErr.message.split('\n')[0]}). Alternando para Headless...`);
+          this.headless = true;
+          this.browser = await chromium.launch({
+            headless: true,
+            args: launchArgs
+          });
+        } else {
+          throw launchErr;
+        }
+      }
 
       const contextOptions = {
         viewport: { width: 1280, height: 720 }
