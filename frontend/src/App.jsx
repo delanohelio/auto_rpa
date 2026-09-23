@@ -128,7 +128,12 @@ function AppContent() {
       {activeTab === 'blocks' && (
         <BlocksView
           initialEditingId={activeId}
-          onClearInitialEditingId={() => setActiveId(null)}
+          onClearInitialEditingId={() => {
+            setActiveId(null);
+            const url = new URL(window.location.href);
+            url.searchParams.delete('id');
+            window.history.replaceState({ tab: 'blocks', id: null }, '', url.toString());
+          }}
           onTestInSandbox={(block) => {
             setSandboxInitialData({ type: 'block', data: block });
             handleNavigate('sandbox');
@@ -150,7 +155,12 @@ function AppContent() {
       {activeTab === 'tasks' && (
         <TasksView
           initialEditingId={activeId}
-          onClearInitialEditingId={() => setActiveId(null)}
+          onClearInitialEditingId={() => {
+            setActiveId(null);
+            const url = new URL(window.location.href);
+            url.searchParams.delete('id');
+            window.history.replaceState({ tab: 'tasks', id: null }, '', url.toString());
+          }}
           onNavigateToLogs={() => handleNavigate('logs')}
           onTestInSandbox={(task) => {
             setSandboxInitialData({ type: 'pipeline', data: task });
@@ -168,7 +178,12 @@ function AppContent() {
       {activeTab === 'logs' && (
         <LogsView
           initialLogId={activeId}
-          onClearInitialLogId={() => setActiveId(null)}
+          onClearInitialLogId={() => {
+            setActiveId(null);
+            const url = new URL(window.location.href);
+            url.searchParams.delete('id');
+            window.history.replaceState({ tab: 'logs', id: null }, '', url.toString());
+          }}
         />
       )}
 

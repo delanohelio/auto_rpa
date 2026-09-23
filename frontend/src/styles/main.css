@@ -1239,6 +1239,55 @@ select.form-control {
   transform: translateY(-1px);
 }
 
+.sandbox-insert-selector {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  margin-left: 4px;
+}
+
+.insert-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 2px;
+}
+
+.insert-option-btn {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.insert-option-btn:hover:not(:disabled) {
+  color: var(--text-light);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.insert-option-btn.active {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #60a5fa;
+}
+
+.insert-option-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .sandbox-steps-list {
   flex-grow: 1;
   overflow-y: auto;
@@ -1348,6 +1397,44 @@ select.form-control {
 
 .sandbox-step-card.step-failed {
   border-color: rgba(239, 68, 68, 0.4);
+}
+
+.sandbox-step-card.is-dragging {
+  opacity: 0.45;
+  border-style: dashed;
+  border-color: var(--color-primary);
+  transform: scale(0.99);
+}
+
+.sandbox-step-card.drag-over-above {
+  border-top: 2px solid var(--color-primary) !important;
+  box-shadow: 0 -4px 12px rgba(59, 130, 246, 0.35);
+}
+
+.sandbox-step-card.drag-over-below {
+  border-bottom: 2px solid var(--color-primary) !important;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
+}
+
+.step-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  cursor: grab;
+  padding: 3px 2px;
+  border-radius: 4px;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+  user-select: none;
+}
+
+.step-drag-handle:hover {
+  color: var(--text-light);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.step-drag-handle:active {
+  cursor: grabbing;
 }
 
 .step-card-header {

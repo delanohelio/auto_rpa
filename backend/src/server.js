@@ -340,7 +340,9 @@ app.post('/api/schedules/:id/run', async (req, res) => {
 app.get('/api/runs/active', (req, res) => {
   try {
     const logs = db.getLogs();
-    const runningLogs = logs.filter(l => l.status === 'running');
+    const runningLogs = (Array.isArray(logs) ? logs : []).filter(
+      l => l && l.status === 'running' && typeof l.id === 'string' && l.id.trim().length > 0
+    );
     
     const activeRuns = runningLogs.map(l => {
       const isAgentWaiting = activeControlSessions.has(l.id);
@@ -628,6 +630,28 @@ app.post('/api/interactive/submit', (req, res) => {
   }
 });
 
+// POST /api/interactive/continue - Continue pipeline from manual interaction or prompt
+app.post('/api/interactive/continue', (req, res) => {
+  try {
+    const { runId } = req.body;
+    if (!runId) return res.status(400).json({ error: 'runId is required' });
+    const session = activePromptSessions.get(runId);
+    if (!session) {
+      return res.status(404).json({ error: 'Sessão interativa não encontrada ou expirada.' });
+    }
+    if (session.timeoutTimer) {
+      clearTimeout(session.timeoutTimer);
+      session.timeoutTimer = null;
+    }
+    activePromptSessions.delete(runId);
+    session.resolvePromise({ manualDone: true });
+    console.log(`Manual interaction confirmed for run ${runId}. Resuming pipeline...`);
+    res.json({ success: true, message: 'Pipeline retomado com sucesso.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // --- 7. PIPELINE REAL-TIME STREAMING API ---
 app.get('/api/runs/:runId/stream', (req, res) => {
   const { runId } = req.params;
@@ -760,5 +784,24 @@ if (fs.existsSync(frontendDistPath)) {
 // Start Server and Cron scheduler
 app.listen(PORT, () => {
   console.log(`Backend Server running on port ${PORT}`);
+  // Mark any orphaned running runs from previous sessions as interrupted
+  try {
+    const allLogs = db.getLogs();
+    let orphanedCleaned = 0;
+    for (const log of (Array.isArray(allLogs) ? allLogs : [])) {
+      if (log && log.status === 'running') {
+        log.status = 'failure';
+        log.error = log.error || 'Execução interrompida pela reinicialização do servidor.';
+        log.endedAt = log.endedAt || new Date().toISOString();
+        db.addLog(log);
+        orphanedCleaned++;
+      }
+    }
+    if (orphanedCleaned > 0) {
+      console.log(`[Startup] ${orphanedCleaned} execuções órfãs anteriores foram finalizadas.`);
+    }
+  } catch (e) {
+    console.error('[Startup] Erro ao limpar execuções órfãs:', e);
+  }
   initScheduler();
 });

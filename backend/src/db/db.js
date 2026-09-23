@@ -382,12 +382,13 @@ export const db = {
 
   addLog(logData) {
     const data = readDB();
-    const existingIndex = logData.id ? data.logs.findIndex(l => l.id === logData.id) : -1;
+    const id = (typeof logData.id === 'string' && logData.id.trim()) ? logData.id.trim() : crypto.randomUUID();
+    const existingIndex = data.logs.findIndex(l => l.id === id);
 
     const logToSave = {
-      id: logData.id || crypto.randomUUID(),
       ...logData,
-      createdAt: new Date().toISOString()
+      id,
+      createdAt: logData.createdAt || new Date().toISOString()
     };
     
     if (existingIndex >= 0) {

@@ -36,7 +36,9 @@ import {
   Lock,
   FolderInput,
   Key,
-  X
+  X,
+  GripVertical,
+  MousePointerClick
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -87,6 +89,12 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
   const [isRunningAll, setIsRunningAll] = useState(false);
   const [consoleLogs, setConsoleLogs] = useState([]);
   const [isFullscreenStream, setIsFullscreenStream] = useState(false);
+
+  // Insertion Position & Drag-and-Drop Reordering States (Requirements 1 & 2)
+  const [insertPosition, setInsertPosition] = useState('end'); // 'end' | 'after_executed'
+  const [draggedIndex, setDraggedIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
+  const [dragDropSide, setDragDropSide] = useState(null); // 'above' | 'below'
 
   // Modals & Import State
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -366,7 +374,7 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
   };
 
   // Step Management
-  const addStep = (type) => {
+  const addStep = (type, atIndex = null) => {
     const newStep = { type };
     if (type === 'navigate') newStep.url = 'https://';
     if (type === 'click') {
@@ -402,8 +410,86 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
     if (type === 'screenshot') {
       newStep.name = 'captura_sandbox';
     }
+    if (type === 'manual_interaction') {
+      newStep.instruction = 'Realize as ações necessárias com o mouse e teclado na janela do navegador e depois clique em Continuar.';
+      newStep.timeout = 600;
+    }
 
-    setSteps(prev => [...prev, newStep]);
+    setSteps(prev => {
+      const copy = [...prev];
+      let targetIdx = atIndex;
+      if (targetIdx === null) {
+        if (insertPosition === 'after_executed' && lastExecutedIndex >= 0 && lastExecutedIndex < copy.length) {
+          targetIdx = lastExecutedIndex + 1;
+        } else {
+          targetIdx = copy.length;
+        }
+      }
+      targetIdx = Math.max(0, Math.min(copy.length, targetIdx));
+      copy.splice(targetIdx, 0, newStep);
+      return copy;
+    });
+
+    const stepLabel = type === 'manual_interaction' ? 'Interação Manual' : type;
+    toast.success('Ação Adicionada', `Ação "${stepLabel}" inserida com sucesso.`);
+  };
+
+  // Drag and drop reordering handlers (Requirement 2)
+  const handleDragStart = (e, index) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(index));
+  };
+
+  const handleDragOver = (e, index) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (draggedIndex === null || draggedIndex === index) {
+      setDragOverIndex(null);
+      setDragDropSide(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    const side = e.clientY < midY ? 'above' : 'below';
+    setDragOverIndex(index);
+    setDragDropSide(side);
+  };
+
+  const handleDrop = (e, targetIndex) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === targetIndex) {
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+      setDragDropSide(null);
+      return;
+    }
+
+    setSteps(prev => {
+      const copy = [...prev];
+      const [movedItem] = copy.splice(draggedIndex, 1);
+      let finalIdx = targetIndex;
+      if (draggedIndex < targetIndex) {
+        finalIdx = dragDropSide === 'above' ? targetIndex - 1 : targetIndex;
+      } else {
+        finalIdx = dragDropSide === 'above' ? targetIndex : targetIndex + 1;
+      }
+      finalIdx = Math.max(0, Math.min(copy.length, finalIdx));
+      copy.splice(finalIdx, 0, movedItem);
+      return copy;
+    });
+
+    setStepResults({});
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+    setDragDropSide(null);
+    toast.info('Ações Reordenadas', `Ação movida para a posição #${targetIndex + 1}.`);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+    setDragDropSide(null);
   };
 
   const updateStep = (index, field, value) => {
@@ -476,6 +562,8 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
         return `Listar: ${step.query_selector || 'elementos'}`;
       case 'screenshot':
         return `Screenshot: ${step.name || 'captura'}`;
+      case 'manual_interaction':
+        return `Interação Manual: ${(step.instruction || 'Aguardar usuário').substring(0, 35)}...`;
       case 'conditional_if':
         return `Condição se existe: ${step.selector_exists || step.selector || ''}`;
       case 'extract_html':
@@ -1065,6 +1153,37 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
                 <button type="button" className="palette-btn" onClick={() => addStep('screenshot')}>
                   <Camera size={12} color="#e879f9" /> + Screenshot
                 </button>
+                <button
+                  type="button"
+                  className="palette-btn"
+                  onClick={() => addStep('manual_interaction')}
+                  title="Pausa a automação para você realizar ações livres com mouse e teclado na janela do navegador"
+                  style={{ borderLeft: '1px solid rgba(168, 85, 247, 0.3)', background: 'rgba(168, 85, 247, 0.08)' }}
+                >
+                  <MousePointerClick size={12} color="#c084fc" /> + Interação Manual
+                </button>
+              </div>
+
+              {/* Insertion Position Selector (Requirement 1) */}
+              <div className="sandbox-insert-selector">
+                <span className="insert-label">Inserir:</span>
+                <button
+                  type="button"
+                  className={`insert-option-btn ${insertPosition === 'end' ? 'active' : ''}`}
+                  onClick={() => setInsertPosition('end')}
+                  title="Inserir novas ações sempre no final da lista"
+                >
+                  No Final
+                </button>
+                <button
+                  type="button"
+                  className={`insert-option-btn ${insertPosition === 'after_executed' ? 'active' : ''}`}
+                  onClick={() => setInsertPosition('after_executed')}
+                  disabled={lastExecutedIndex < 0}
+                  title={lastExecutedIndex >= 0 ? `Inserir novas ações logo abaixo da ação #${lastExecutedIndex + 1} executada` : 'Execute ao menos uma ação para habilitar esta opção'}
+                >
+                  Abaixo da Executada {lastExecutedIndex >= 0 ? `(#${lastExecutedIndex + 1})` : ''}
+                </button>
               </div>
             </div>
 
@@ -1122,16 +1241,31 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
                 const isExecuting = executingStepIndex === index;
                 const result = stepResults[index];
                 const isCollapsed = !!collapsedSteps[index];
+                const isDragging = draggedIndex === index;
+                const isDragOver = dragOverIndex === index;
 
                 return (
                   <div
                     key={index}
                     ref={el => { stepRefs.current[index] = el; }}
-                    className={`sandbox-step-card ${isExecuting ? 'step-executing' : ''} ${result ? (result.success ? 'step-success' : 'step-failed') : ''}`}
+                    className={`sandbox-step-card ${isExecuting ? 'step-executing' : ''} ${result ? (result.success ? 'step-success' : 'step-failed') : ''} ${isDragging ? 'is-dragging' : ''} ${isDragOver ? (dragDropSide === 'above' ? 'drag-over-above' : 'drag-over-below') : ''}`}
+                    onDragOver={(e) => handleDragOver(e, index)}
+                    onDrop={(e) => handleDrop(e, index)}
                   >
                     {/* Step Card Header */}
                     <div className="step-card-header">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        {/* Drag Handle (Requirement 2) */}
+                        <div
+                          className="step-drag-handle"
+                          draggable={true}
+                          onDragStart={(e) => handleDragStart(e, index)}
+                          onDragEnd={handleDragEnd}
+                          title="Clique e segure para arrastar e reordenar esta ação"
+                        >
+                          <GripVertical size={14} />
+                        </div>
+
                         <button
                           type="button"
                           className="btn-icon-subtle"
@@ -1222,6 +1356,16 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
                             <Play size={13} fill="currentColor" />
                           )}
                           <span>Executar Ação</span>
+                        </button>
+
+                        {/* Inline Add Action directly below this one (Requirement 1) */}
+                        <button
+                          type="button"
+                          className="btn-icon-subtle"
+                          onClick={() => addStep('click', index + 1)}
+                          title="Adicionar nova ação logo abaixo desta"
+                        >
+                          <Plus size={13} />
                         </button>
 
                         <button
@@ -1680,8 +1824,51 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
                           </div>
                         )}
 
+                        {/* Manual Interaction (Requirement 1 & 1.1) */}
+                        {step.type === 'manual_interaction' && (
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                              <label style={{ fontSize: '11px', margin: 0, fontWeight: 600, color: '#c084fc' }}>
+                                Instruções para o Operador / Usuário
+                              </label>
+                              <span className="badge" style={{ fontSize: '10px', background: 'rgba(168, 85, 247, 0.15)', color: '#d8b4fe', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
+                                Requer Janela Visual (Headed)
+                              </span>
+                            </div>
+                            <textarea
+                              className="form-control"
+                              style={{ fontSize: '12px', padding: '6px 10px', resize: 'vertical' }}
+                              rows={2}
+                              placeholder="ex: Resolva o hCaptcha / realize o login com token na janela do navegador e depois clique em Continuar"
+                              value={step.instruction || step.message || ''}
+                              onChange={e => {
+                                updateStep(index, 'instruction', e.target.value);
+                                updateStep(index, 'message', e.target.value);
+                              }}
+                            />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '6px' }}>
+                              <div style={{ flex: 1 }}>
+                                <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                                  Timeout Máximo de Espera (segundos, 0 = infinito):
+                                </label>
+                                <input
+                                  type="number"
+                                  className="form-control"
+                                  style={{ fontSize: '11px', padding: '4px 8px' }}
+                                  placeholder="0"
+                                  value={step.timeout ?? 0}
+                                  onChange={e => updateStep(index, 'timeout', parseFloat(e.target.value) || 0)}
+                                />
+                              </div>
+                            </div>
+                            <div style={{ marginTop: '6px', fontSize: '11px', color: '#a78bfa', background: 'rgba(168, 85, 247, 0.08)', padding: '6px 10px', borderRadius: '4px', border: '1px solid rgba(168, 85, 247, 0.2)' }}>
+                              💡 Quando esta ação for executada em um Pipeline, a janela do navegador Playwright abrirá na tela do operador para controle com mouse e teclado. Ao concluir, o operador clica no botão "Continuar".
+                            </div>
+                          </div>
+                        )}
+
                         {/* Fallback for any other custom step */}
-                        {!['navigate', 'click', 'type', 'select', 'wait', 'keypress', 'eval', 'dynamic_script', 'list_elements', 'screenshot', 'conditional_if', 'extract_html', 'user_prompt', 'agent_control'].includes(step.type) && (
+                        {!['navigate', 'click', 'type', 'select', 'wait', 'keypress', 'eval', 'dynamic_script', 'list_elements', 'screenshot', 'conditional_if', 'extract_html', 'user_prompt', 'agent_control', 'manual_interaction'].includes(step.type) && (
                           <div>
                             <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Configuração da Ação ({step.type})</label>
                             <pre style={{ margin: 0, padding: '8px', background: 'rgba(0,0,0,0.3)', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-mono)' }}>
@@ -1735,6 +1922,11 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
                                 {Array.isArray(result.data.items) && (
                                   <div style={{ marginTop: '4px', fontSize: '10px', color: '#facc15' }}>
                                     {result.data.items.length} itens extraídos da página
+                                  </div>
+                                )}
+                                {result.data.isManualInteraction && (
+                                  <div style={{ marginTop: '6px', padding: '6px 10px', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.15)', border: '1px solid rgba(168, 85, 247, 0.3)', color: '#d8b4fe', fontSize: '11px' }}>
+                                    {result.data.note}
                                   </div>
                                 )}
                               </div>

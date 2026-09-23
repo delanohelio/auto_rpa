@@ -14,7 +14,8 @@ import {
   Copy,
   Check,
   FileText,
-  Eye
+  Eye,
+  MousePointer
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -263,6 +264,74 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
               </div>
             </div>
           )}
+
+          {/* Manual Interaction Card (Human in the Loop / Free Browser Interaction) */}
+          {log.status === 'running' && (() => {
+            const manualStep = (log.stepsExecuted || []).find(
+              s => s.status === 'running' && s.data && s.data.isManualInteraction && !s.data.completed
+            );
+            if (!manualStep) return null;
+
+            return (
+              <div
+                className="card mb-16"
+                style={{
+                  border: '2px solid #a855f7',
+                  background: 'rgba(168, 85, 247, 0.08)',
+                  padding: '20px',
+                  borderRadius: 'var(--radius-md)'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                  <h4 style={{ margin: 0, fontSize: '16px', color: '#c084fc', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <MousePointer size={18} /> Interação Manual Solicitada
+                  </h4>
+                  <span className="badge" style={{ background: 'rgba(168, 85, 247, 0.2)', color: '#d8b4fe', border: '1px solid rgba(168, 85, 247, 0.4)', fontSize: '11px' }}>
+                    Aguardando Ação no Navegador
+                  </span>
+                </div>
+
+                <p style={{ fontSize: '13px', color: 'var(--text-light)', marginBottom: '14px', lineHeight: 1.5 }}>
+                  {manualStep.data.instruction || 'Por favor, realize as ações necessárias com o mouse e teclado na janela aberta do navegador.'}
+                </p>
+
+                <div style={{ padding: '10px 14px', background: 'rgba(0,0,0,0.3)', borderRadius: '6px', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px' }}>
+                  <span>💡 <strong>Atenção:</strong> A janela do Chromium foi aberta na sua área de trabalho. Resolva o Captcha, login ou ações manuais necessárias e, em seguida, clique no botão abaixo para prosseguir a automação.</span>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={isSubmittingPrompt}
+                    onClick={async () => {
+                      setIsSubmittingPrompt(true);
+                      try {
+                        const res = await apiFetch('/api/interactive/continue', {
+                          method: 'POST',
+                          body: JSON.stringify({ runId: log.id })
+                        });
+                        if (!res.ok) {
+                          const errData = await res.json().catch(() => ({}));
+                          throw new Error(errData.error || 'Falha ao confirmar continuação');
+                        }
+                        toast.success('Interação Confirmada', 'Retomando a execução da pipeline...');
+                        if (fetchLogDetails) fetchLogDetails();
+                      } catch (err) {
+                        toast.error('Erro ao continuar', err.message);
+                      } finally {
+                        setIsSubmittingPrompt(false);
+                      }
+                    }}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: '#9333ea', borderColor: '#a855f7' }}
+                  >
+                    {isSubmittingPrompt ? <RefreshCw className="spin" size={14} /> : <Play size={14} style={{ fill: 'currentColor' }} />}
+                    Concluir Interação & Continuar Pipeline
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Interactive Prompt Card (Human in the Loop) */}
           {log.status === 'running' && (() => {

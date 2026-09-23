@@ -419,6 +419,25 @@ class SandboxManager {
           break;
         }
 
+        case 'manual_interaction':
+        case 'user_interaction':
+        case 'interacao_manual': {
+          const instruction = resolveText(
+            step.instruction || step.message || 'Por favor, realize as ações necessárias com o mouse e teclado no navegador e depois continue.',
+            resolvedSecrets,
+            parameters
+          );
+          resultLog.data = {
+            isManualInteraction: true,
+            instruction,
+            message: 'Ação de interação manual executada no Sandbox.',
+            note: this.headless
+              ? 'Dica: Alterne para o modo "Headed (Visual)" no topo do Studio caso queira interagir diretamente na janela do sistema operacional.'
+              : 'Janela do Chromium aberta na sua área de trabalho para interação direta.'
+          };
+          break;
+        }
+
         default: {
           console.warn(`[Sandbox] Ação "${step.type}" não suportada ou ignorada no Sandbox Studio.`);
           resultLog.skipped = true;

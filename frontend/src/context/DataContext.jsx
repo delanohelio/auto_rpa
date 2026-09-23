@@ -27,6 +27,8 @@ export function DataProvider({ children }) {
 
   // Keep track of previously seen runs to notify on finish
   const prevActiveRunIds = useRef(new Set());
+  const isFirstActiveRunsCheck = useRef(true);
+  const notifiedRunIds = useRef(new Set());
 
   const fetchStats = useCallback(async () => {
     try {
@@ -80,20 +82,27 @@ export function DataProvider({ children }) {
     try {
       const res = await apiFetch('/api/runs/active');
       if (res.ok) {
-        const runs = await res.json();
+        const rawRuns = await res.json();
+        const runs = (Array.isArray(rawRuns) ? rawRuns : []).filter(
+          r => r && typeof r.runId === 'string' && r.runId.trim().length > 0
+        );
         setActiveRuns(runs);
 
         const currentIds = new Set(runs.map(r => r.runId));
 
-        // Check if any run that was previously active has completed
-        for (const prevId of prevActiveRunIds.current) {
-          if (!currentIds.has(prevId)) {
-            // A run has finished! Refresh stats
-            fetchStats();
-            toast.info('Execução Concluída', `Uma pipeline em andamento finalizou.`);
+        // Only compare against previously active runs if this is NOT the very first mount check
+        if (!isFirstActiveRunsCheck.current && prevActiveRunIds.current.size > 0) {
+          for (const prevId of prevActiveRunIds.current) {
+            if (typeof prevId === 'string' && !currentIds.has(prevId) && !notifiedRunIds.current.has(prevId)) {
+              // A run that was active has finished!
+              notifiedRunIds.current.add(prevId);
+              fetchStats();
+              toast.info('Execução Concluída', 'Uma pipeline em andamento foi finalizada.');
+            }
           }
         }
 
+        isFirstActiveRunsCheck.current = false;
         prevActiveRunIds.current = currentIds;
       }
     } catch (e) {

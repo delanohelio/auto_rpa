@@ -5,7 +5,15 @@ import { useData } from '../../context/DataContext';
 export default function TaskRunModal({ task, onStartRun, onClose }) {
   const { blocks } = useData();
   const [runOverrides, setRunOverrides] = useState({});
-  const [browserMode, setBrowserMode] = useState('headless'); // 'headless' | 'headed'
+
+  // Check if any block in this pipeline contains manual_interaction (Requirement 1.1)
+  const hasManualInteraction = Boolean(task?.blocks?.some(instance => {
+    const blkId = instance.blockId || instance;
+    const blk = blocks.find(b => b.id === blkId);
+    return blk?.steps?.some(s => s.type === 'manual_interaction' || s.type === 'user_interaction' || s.type === 'interacao_manual');
+  }));
+
+  const [browserMode, setBrowserMode] = useState(() => hasManualInteraction ? 'headed' : 'headless');
   const [liveView, setLiveView] = useState(true);
   const [runTaskVars, setRunTaskVars] = useState(() => {
     const promptVars = {};
@@ -47,7 +55,7 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
       .map(([vName]) => vName);
 
     onStartRun(cleanedOverrides, runTaskVars, cleanedSkipList, {
-      headless: browserMode === 'headless',
+      headless: hasManualInteraction ? false : (browserMode === 'headless'),
       liveView
     });
     onClose();
@@ -98,16 +106,19 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
                     borderRadius: '6px',
                     background: browserMode === 'headless' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(255, 255, 255, 0.05)',
                     border: browserMode === 'headless' ? '1px solid var(--color-primary)' : '1px solid var(--border-color)',
-                    cursor: 'pointer',
+                    cursor: hasManualInteraction ? 'not-allowed' : 'pointer',
+                    opacity: hasManualInteraction ? 0.4 : 1,
                     color: browserMode === 'headless' ? '#93c5fd' : 'var(--text-muted)'
                   }}
+                  title={hasManualInteraction ? 'Desabilitado: esta pipeline possui ação de Interação Manual e requer janela visual' : undefined}
                 >
                   <input
                     type="radio"
                     name="browserMode"
                     value="headless"
+                    disabled={hasManualInteraction}
                     checked={browserMode === 'headless'}
-                    onChange={() => setBrowserMode('headless')}
+                    onChange={() => !hasManualInteraction && setBrowserMode('headless')}
                     style={{ margin: 0 }}
                   />
                   Headless (Segundo Plano)
@@ -135,10 +146,19 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
                     onChange={() => setBrowserMode('headed')}
                     style={{ margin: 0 }}
                   />
-                  Headed (Com Janela Visual)
+                  Headed (Visual)
                 </label>
               </div>
             </div>
+
+            {hasManualInteraction && (
+              <div style={{ fontSize: '11px', color: '#facc15', background: 'rgba(234, 179, 8, 0.1)', padding: '8px 12px', borderRadius: '6px', border: '1px solid rgba(234, 179, 8, 0.25)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '13px' }}>💡</span>
+                <span>
+                  Esta pipeline contém uma ação de <strong>Interação Manual</strong>. O modo visual (Headed com janela aberta na sua tela) é obrigatório para você interagir com a página.
+                </span>
+              </div>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

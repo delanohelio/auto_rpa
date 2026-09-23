@@ -15,7 +15,8 @@ import {
   Edit2,
   Check,
   X,
-  Shield
+  Shield,
+  MousePointerClick
 } from 'lucide-react';
 import CodeEditor from '../code/CodeEditor';
 import CodeViewer from '../code/CodeViewer';
@@ -93,6 +94,10 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
       newStep.promptDescription = '';
       newStep.vars = [{ name: 'param1', label: 'Campo 1', defaultValue: '' }];
       newStep.dynamic_script = '';
+    }
+    if (type === 'manual_interaction') {
+      newStep.instruction = 'Realize as ações necessárias com o mouse e teclado na janela do navegador e depois clique em Continuar.';
+      newStep.timeout = 600;
     }
 
     setEditingBlock(prev => ({
@@ -372,6 +377,9 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                     <button type="button" className="btn btn-secondary btn-sm" style={{ borderColor: '#a855f7', color: '#c084fc' }} onClick={() => addStep('agent_control')}>
                       <Bot size={12} /> + Handoff Agente
                     </button>
+                    <button type="button" className="btn btn-secondary btn-sm" style={{ borderColor: 'rgba(192, 132, 252, 0.5)', color: '#c084fc', background: 'rgba(168, 85, 247, 0.08)' }} onClick={() => addStep('manual_interaction')}>
+                      <MousePointerClick size={12} /> + Interação Manual
+                    </button>
                   </div>
                 </div>
 
@@ -400,6 +408,7 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                               {step.type === 'eval' && 'Executar Javascript (Eval)'}
                               {step.type === 'agent_control' && 'Handoff para Agente de IA'}
                               {step.type === 'user_prompt' && 'Prompt Interativo de Variáveis'}
+                              {step.type === 'manual_interaction' && 'Interação Manual do Usuário (Mouse / Teclado)'}
                             </span>
                           </h4>
 
@@ -717,6 +726,46 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                           {step.type === 'screenshot' && (
                             <div className="step-col-full" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
                               Registra uma captura de tela visual no histórico da execução.
+                            </div>
+                          )}
+
+                          {/* Manual Interaction (Requirement 1 & 1.1) */}
+                          {step.type === 'manual_interaction' && (
+                            <div className="step-col-full" style={{ background: 'rgba(168, 85, 247, 0.08)', border: '1px solid rgba(168, 85, 247, 0.25)', padding: '14px', borderRadius: 'var(--radius-md)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#c084fc', fontWeight: 600, fontSize: '13px' }}>
+                                  <MousePointerClick size={16} /> Interação Manual do Usuário
+                                </div>
+                                <span className="badge" style={{ background: 'rgba(168, 85, 247, 0.2)', color: '#d8b4fe', border: '1px solid rgba(168, 85, 247, 0.4)', fontSize: '11px' }}>
+                                  Força Navegador Visual (Headed)
+                                </span>
+                              </div>
+                              <div style={{ marginBottom: '10px' }}>
+                                <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Instruções para o Operador</label>
+                                <textarea
+                                  className="form-control"
+                                  rows={2}
+                                  placeholder="ex: Resolva o captcha / complete o login na janela do navegador e depois clique em Continuar"
+                                  value={step.instruction || step.message || ''}
+                                  onChange={e => {
+                                    updateStepField(index, 'instruction', e.target.value);
+                                    updateStepField(index, 'message', e.target.value);
+                                  }}
+                                />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Timeout Máximo de Espera (segundos, 0 = sem limite)</label>
+                                <input
+                                  type="number"
+                                  className="form-control"
+                                  placeholder="600"
+                                  value={step.timeout ?? 600}
+                                  onChange={e => updateStepField(index, 'timeout', parseFloat(e.target.value) || 0)}
+                                />
+                              </div>
+                              <div style={{ marginTop: '8px', fontSize: '11px', color: '#a78bfa' }}>
+                                💡 Ao atingir esta etapa durante o pipeline, a execução pausará e o navegador Playwright abrirá com janela visível na tela. O operador poderá interagir livremente com mouse/teclado e, ao terminar, clicar no botão "Continuar".
+                              </div>
                             </div>
                           )}
                         </div>

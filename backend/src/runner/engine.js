@@ -152,6 +152,10 @@ export async function runTask(
   scheduleId = null,
   options = {}
 ) {
+  // Ensure runId is strictly a valid string UUID
+  const effectiveRunId = (typeof runId === 'string' && runId.trim()) ? runId.trim() : crypto.randomUUID();
+  runId = effectiveRunId;
+
   const startedAt = new Date().toISOString();
   const task = db.getTask(taskId);
   if (!task) {
@@ -176,13 +180,54 @@ export async function runTask(
     throw new Error(errorRecord.error);
   }
 
-  const isHeadless = options.headless !== undefined
+  // Pre-load all action blocks with instance values to ensure they exist before starting browser
+  const blocks = [];
+  const blockInstances = task.blocks || [];
+  for (const instance of blockInstances) {
+    const block = db.getBlock(instance.blockId, false); // Get RAW block with encrypted secrets
+    if (!block) {
+      const errorRecord = {
+        id: runId,
+        taskId: task.id,
+        taskName: task.name,
+        trigger,
+        scheduleId,
+        status: 'failure',
+        startedAt,
+        endedAt: new Date().toISOString(),
+        duration: 0,
+        error: `Block dependency with ID ${instance.blockId} was not found`,
+        stepsExecuted: []
+      };
+      db.addLog(errorRecord);
+      return errorRecord;
+    }
+    blocks.push({
+      definition: block,
+      instance: instance
+    });
+  }
+
+  // Check if any block contains a manual_interaction step (Requirement 1.1)
+  const hasManualInteraction = blocks.some(b =>
+    (b.definition.steps || []).some(s =>
+      s.type === 'manual_interaction' || s.type === 'user_interaction' || s.type === 'interacao_manual'
+    )
+  );
+
+  let isHeadless = options.headless !== undefined
     ? Boolean(options.headless)
     : (process.env.HEADLESS !== 'false');
 
-  const isLiveView = options.liveView !== undefined
+  let isLiveView = options.liveView !== undefined
     ? Boolean(options.liveView)
     : true;
+
+  if (hasManualInteraction) {
+    console.log(`[Engine] Pipeline "${task.name}" contém ação de Interação Manual (manual_interaction). Forçando execução em modo Visual (Headed: true).`);
+    isHeadless = false;
+    isLiveView = true;
+  }
 
   const logRecord = {
     id: runId,
@@ -203,24 +248,6 @@ export async function runTask(
     headless: isHeadless,
     liveView: isLiveView
   };
-
-  // Pre-load all action blocks with instance values to ensure they exist before starting browser
-  const blocks = [];
-  const blockInstances = task.blocks || [];
-  for (const instance of blockInstances) {
-    const block = db.getBlock(instance.blockId, false); // Get RAW block with encrypted secrets
-    if (!block) {
-      logRecord.status = 'failure';
-      logRecord.endedAt = new Date().toISOString();
-      logRecord.error = `Block dependency with ID ${instance.blockId} was not found`;
-      db.addLog(logRecord);
-      return logRecord;
-    }
-    blocks.push({
-      definition: block,
-      instance: instance
-    });
-  }
 
   logRecord.status = 'running';
   db.addLog(logRecord); // Write log state so the UI picks it up immediately
@@ -761,6 +788,58 @@ export async function runTask(
                 message: 'Variáveis preenchidas e confirmadas com sucesso.'
               };
               console.log(`Interactive prompt "${promptTitle}" completed. Updated parameters:`, submittedValues);
+              break;
+            }
+
+            case 'manual_interaction':
+            case 'user_interaction':
+            case 'interacao_manual': {
+              const timeoutSec = parseInt(step.timeout, 10) || 600; // Default 10 minutes
+              const instruction = resolveText(
+                step.instruction || step.message || 'Por favor, realize as ações necessárias com mouse e teclado na janela do navegador e depois clique em Continuar.',
+                decryptedSecrets,
+                mergedParams
+              );
+
+              console.log(`[Engine] Pipeline em pausa para Interação Manual: "${instruction}". Aguardando usuário no navegador (timeout: ${timeoutSec}s)...`);
+
+              stepLog.status = 'running';
+              stepLog.data = {
+                isManualInteraction: true,
+                instruction,
+                timeoutSec,
+                startedAt: new Date().toISOString()
+              };
+              db.addLog(logRecord); // Update log immediately so frontend displays the manual interaction card
+
+              await new Promise((resolve, reject) => {
+                const session = {
+                  runId,
+                  stepIndex: sIndex,
+                  status: 'waiting_manual',
+                  promptTitle: 'Interação Manual do Usuário',
+                  promptDescription: instruction,
+                  timeoutTimer: null,
+                  resolvePromise: resolve,
+                  rejectPromise: reject
+                };
+
+                activePromptSessions.set(runId, session);
+
+                session.timeoutTimer = setTimeout(() => {
+                  if (activePromptSessions.has(runId)) {
+                    activePromptSessions.delete(runId);
+                    reject(new Error(`Tempo limite excedido (${timeoutSec}s) para conclusão da interação manual no navegador.`));
+                  }
+                }, timeoutSec * 1000);
+              });
+
+              stepLog.data = {
+                isManualInteraction: true,
+                completed: true,
+                message: 'Interação manual concluída com sucesso pelo usuário.'
+              };
+              console.log(`[Engine] Interação manual para run ${runId} concluída. Retomando execução do pipeline...`);
               break;
             }
 
