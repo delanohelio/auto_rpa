@@ -35,6 +35,62 @@ export const activeRunStreams = new Map();
 // Active Playwright page instances for pipeline runs (allows interaction forwarding)
 export const activeRunPages = new Map();
 
+// Active abort controllers for cancelling pipeline runs
+export const activeRunAbortControllers = new Map();
+
+/**
+ * Stop and cancel a running pipeline execution immediately
+ */
+export async function stopTaskRun(runId) {
+  if (!runId) return { success: false, error: 'runId is required' };
+
+  console.log(`[Engine] Solicitação de cancelamento recebida para run: ${runId}`);
+
+  // Trigger abort signal
+  const controller = activeRunAbortControllers.get(runId);
+  if (controller) {
+    controller.abort();
+  }
+
+  // Reject active manual or prompt sessions
+  if (activePromptSessions.has(runId)) {
+    const session = activePromptSessions.get(runId);
+    if (session.timeoutTimer) clearTimeout(session.timeoutTimer);
+    activePromptSessions.delete(runId);
+    session.rejectPromise?.(new Error('Execução cancelada pelo usuário.'));
+  }
+
+  // Reject active agent handoff sessions
+  if (activeControlSessions.has(runId)) {
+    const session = activeControlSessions.get(runId);
+    if (session.acquireTimeoutTimer) clearTimeout(session.acquireTimeoutTimer);
+    if (session.executionTimeoutTimer) clearTimeout(session.executionTimeoutTimer);
+    activeControlSessions.delete(runId);
+    session.rejectPromise?.(new Error('Execução cancelada pelo usuário.'));
+  }
+
+  // Close active page and context immediately
+  const page = activeRunPages.get(runId);
+  if (page && !page.isClosed()) {
+    try {
+      await page.close();
+    } catch (_) {}
+  }
+  activeRunPages.delete(runId);
+
+  // Update log record in database
+  const log = db.getLog(runId);
+  if (log && log.status === 'running') {
+    log.status = 'cancelled';
+    log.endedAt = new Date().toISOString();
+    log.duration = Math.max(0, Math.round((new Date(log.endedAt) - new Date(log.startedAt)) / 1000));
+    log.error = 'Execução cancelada pelo usuário.';
+    db.addLog(log);
+  }
+
+  return { success: true, message: 'Execução cancelada com sucesso.' };
+}
+
 
 /**
  * Replace secret and parameter references in text
@@ -161,6 +217,8 @@ export async function runTask(
   runId = effectiveRunId;
 
   const startedAt = new Date().toISOString();
+  const abortController = new AbortController();
+  activeRunAbortControllers.set(runId, abortController);
   const task = db.getTask(taskId);
   if (!task) {
     const errorRecord = {
@@ -302,7 +360,14 @@ export async function runTask(
   try {
     console.log(`Starting execution of Task: "${task.name}" (${taskId}) - Headless: ${isHeadless}, LiveView: ${isLiveView}`);
     
-    const launchArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'];
+    const launchArgs = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--silent-debugger-extension-api',
+      '--disable-infobars',
+      '--disable-hang-monitor'
+    ];
     if (task.antiDetection) {
       launchArgs.push('--disable-blink-features=AutomationControlled');
     }
@@ -410,6 +475,9 @@ export async function runTask(
 
     // Iterate through modules (blocks)
     for (let bIndex = 0; bIndex < blocks.length; bIndex++) {
+      if (abortController.signal.aborted) {
+        throw new Error('Execução cancelada pelo usuário.');
+      }
       const { definition: block, instance } = blocks[bIndex];
       logRecord.currentBlockId = block.id;
       logRecord.currentBlockName = block.name;
@@ -458,6 +526,9 @@ export async function runTask(
 
       // Iterate through steps inside block
       for (let sIndex = 0; sIndex < block.steps.length; sIndex++) {
+        if (abortController.signal.aborted) {
+          throw new Error('Execução cancelada pelo usuário.');
+        }
         const step = block.steps[sIndex];
         logRecord.currentStepIndex = sIndex;
 
@@ -926,10 +997,18 @@ export async function runTask(
     logRecord.status = 'success';
     console.log(`Task "${task.name}" completed successfully`);
   } catch (error) {
-    console.error(`Task "${task.name}" failed:`, error.message);
-    logRecord.status = 'failure';
-    logRecord.error = error.message;
+    const isCancelled = error.message?.includes('cancelada pelo usuário') || abortController.signal.aborted;
+    if (isCancelled) {
+      console.log(`Task "${task.name}" foi cancelada pelo usuário`);
+      logRecord.status = 'cancelled';
+      logRecord.error = 'Execução cancelada pelo usuário.';
+    } else {
+      console.error(`Task "${task.name}" failed:`, error.message);
+      logRecord.status = 'failure';
+      logRecord.error = error.message;
+    }
   } finally {
+    activeRunAbortControllers.delete(runId);
     const endedAt = new Date().toISOString();
     logRecord.endedAt = endedAt;
     logRecord.duration = Math.round((new Date(endedAt) - new Date(startedAt)) / 1000);

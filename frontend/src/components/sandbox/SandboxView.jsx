@@ -89,6 +89,7 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
   const [isRunningAll, setIsRunningAll] = useState(false);
   const [consoleLogs, setConsoleLogs] = useState([]);
   const [isFullscreenStream, setIsFullscreenStream] = useState(false);
+  const [isInteractiveMode, setIsInteractiveMode] = useState(false);
 
   // Insertion Position & Drag-and-Drop Reordering States (Requirements 1 & 2)
   const [insertPosition, setInsertPosition] = useState('end'); // 'end' | 'after_executed'
@@ -119,6 +120,61 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
       ...prev.slice(0, 49)
     ]);
   }, []);
+
+  // Translate click events accurately to 1280x720 accounting for object-fit: contain letterboxing
+  const getRenderedImageCoordinates = (e, imgElement, naturalW = 1280, naturalH = 720) => {
+    if (!imgElement) return null;
+    const rect = imgElement.getBoundingClientRect();
+    const containerW = rect.width;
+    const containerH = rect.height;
+    if (!containerW || !containerH) return null;
+
+    const imageRatio = naturalW / naturalH;
+    const containerRatio = containerW / containerH;
+
+    let renderedW, renderedH, offsetX, offsetY;
+    if (containerRatio > imageRatio) {
+      renderedH = containerH;
+      renderedW = containerH * imageRatio;
+      offsetX = (containerW - renderedW) / 2;
+      offsetY = 0;
+    } else {
+      renderedW = containerW;
+      renderedH = containerW / imageRatio;
+      offsetX = 0;
+      offsetY = (containerH - renderedH) / 2;
+    }
+
+    const clickX = e.clientX - rect.left - offsetX;
+    const clickY = e.clientY - rect.top - offsetY;
+
+    if (clickX < 0 || clickX > renderedW || clickY < 0 || clickY > renderedH) {
+      return null;
+    }
+
+    const normX = Math.round((clickX / renderedW) * naturalW);
+    const normY = Math.round((clickY / renderedH) * naturalH);
+    return {
+      x: Math.max(0, Math.min(naturalW, normX)),
+      y: Math.max(0, Math.min(naturalH, normY))
+    };
+  };
+
+  const handleSandboxClick = async (e) => {
+    if (!isInteractiveMode) return;
+    const coords = getRenderedImageCoordinates(e, e.currentTarget, 1280, 720);
+    if (!coords) return;
+
+    try {
+      await apiFetch('/api/sandbox/interact', {
+        method: 'POST',
+        body: JSON.stringify({ type: 'click', x: coords.x, y: coords.y })
+      });
+      addConsoleLog('info', `Clique manual despachado em (${coords.x}, ${coords.y})`);
+    } catch (err) {
+      console.warn('Interação de clique no sandbox falhou:', err.message);
+    }
+  };
 
   // Auto-scroll to active running step
   useEffect(() => {
@@ -1993,6 +2049,17 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
                   <span>Resetar Navegador</span>
                 </button>
 
+                {/* Toggle Interactive Mode Button (Requirement 4) */}
+                <button
+                  type="button"
+                  className={`btn-studio-interact ${isInteractiveMode ? 'active' : ''}`}
+                  onClick={() => setIsInteractiveMode(prev => !prev)}
+                  title={isInteractiveMode ? 'Modo de interação manual ativado (clique no navegador para interagir)' : 'Ativar modo de interação manual direta com o navegador'}
+                >
+                  <MousePointer size={14} color={isInteractiveMode ? '#c084fc' : 'currentColor'} />
+                  <span>{isInteractiveMode ? 'Interação Ativa' : 'Interagir'}</span>
+                </button>
+
                 {/* URL Input Bar */}
                 <form onSubmit={handleNavigateFromBar} style={{ flexGrow: 1, display: 'flex' }}>
                   <div className="sandbox-url-input-container">
@@ -2048,7 +2115,10 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
                     <img
                       src={streamUrl}
                       alt="Navegador em Tempo Real"
-                      className="sandbox-stream-image"
+                      className={`sandbox-stream-image ${isInteractiveMode ? 'interactive-enabled' : ''}`}
+                      draggable={false}
+                      onDragStart={(e) => e.preventDefault()}
+                      onClick={handleSandboxClick}
                       onError={(e) => {
                         e.target.style.display = 'none';
                         if (e.target.nextElementSibling) {

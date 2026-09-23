@@ -19,7 +19,9 @@ import {
   MousePointer,
   Lock,
   Columns,
-  Globe
+  Globe,
+  Square,
+  Bot
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -43,6 +45,46 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
   // Interactive Prompt & Manual State
   const [promptFormValues, setPromptFormValues] = useState({});
   const [isSubmittingPrompt, setIsSubmittingPrompt] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+
+  // Translate click events accurately to 1280x720 accounting for object-fit: contain letterboxing
+  const getRenderedImageCoordinates = (e, imgElement, naturalW = 1280, naturalH = 720) => {
+    if (!imgElement) return null;
+    const rect = imgElement.getBoundingClientRect();
+    const containerW = rect.width;
+    const containerH = rect.height;
+    if (!containerW || !containerH) return null;
+
+    const imageRatio = naturalW / naturalH;
+    const containerRatio = containerW / containerH;
+
+    let renderedW, renderedH, offsetX, offsetY;
+    if (containerRatio > imageRatio) {
+      renderedH = containerH;
+      renderedW = containerH * imageRatio;
+      offsetX = (containerW - renderedW) / 2;
+      offsetY = 0;
+    } else {
+      renderedW = containerW;
+      renderedH = containerW / imageRatio;
+      offsetX = 0;
+      offsetY = (containerH - renderedH) / 2;
+    }
+
+    const clickX = e.clientX - rect.left - offsetX;
+    const clickY = e.clientY - rect.top - offsetY;
+
+    if (clickX < 0 || clickX > renderedW || clickY < 0 || clickY > renderedH) {
+      return null;
+    }
+
+    const normX = Math.round((clickX / renderedW) * naturalW);
+    const normY = Math.round((clickY / renderedH) * naturalH);
+    return {
+      x: Math.max(0, Math.min(naturalW, normX)),
+      y: Math.max(0, Math.min(naturalH, normY))
+    };
+  };
 
   const fetchLogDetails = async () => {
     if (!logId) return;
@@ -99,20 +141,37 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
     }
   };
 
+  // Handle stopping the pipeline run
+  const handleStopRun = async () => {
+    if (!log?.id) return;
+    if (!window.confirm('Tem certeza de que deseja parar a execução deste pipeline agora?')) return;
+    setIsStopping(true);
+    try {
+      const res = await apiFetch(`/api/runs/${log.id}/stop`, { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Falha ao parar execução');
+      }
+      toast.success('Execução Cancelada', 'A execução do pipeline foi interrompida.');
+      await fetchLogDetails();
+      onRefreshList?.();
+    } catch (err) {
+      toast.error('Erro ao parar execução', err.message);
+    } finally {
+      setIsStopping(false);
+    }
+  };
+
   // Dispatch mouse click on live browser screen during manual interaction
   const handleBrowserClick = async (e) => {
     if (!manualStep) return;
-    const img = e.currentTarget;
-    const rect = img.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const clickY = e.clientY - rect.top;
-    const normalizedX = Math.round((clickX / rect.width) * 1280);
-    const normalizedY = Math.round((clickY / rect.height) * 720);
+    const coords = getRenderedImageCoordinates(e, e.currentTarget, 1280, 720);
+    if (!coords) return;
 
     try {
       await apiFetch(`/api/runs/${log.id}/interact`, {
         method: 'POST',
-        body: JSON.stringify({ type: 'click', x: normalizedX, y: normalizedY })
+        body: JSON.stringify({ type: 'click', x: coords.x, y: coords.y })
       });
     } catch (err) {
       console.warn('Interação de clique falhou:', err.message);
@@ -200,8 +259,21 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
               </div>
             </div>
 
-            {/* Toggle 2-Columns vs 1-Column */}
+            {/* Controls in Header: Stop Run & 2-Col Toggle */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {log?.status === 'running' && (
+                <button
+                  type="button"
+                  className="btn-stop-run"
+                  disabled={isStopping}
+                  onClick={handleStopRun}
+                  title="Interromper imediatamente a execução do pipeline"
+                >
+                  {isStopping ? <RefreshCw className="spin" size={13} /> : <Square size={13} style={{ fill: 'currentColor' }} />}
+                  <span>Parar Execução</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
@@ -232,10 +304,16 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                   <div className="card" style={{ padding: '12px' }}>
                     <p className="stat-title" style={{ fontSize: '11px', marginBottom: '6px' }}>Status</p>
                     <span
-                      className={`badge ${log.status === 'success' ? 'badge-success' : log.status === 'failure' ? 'badge-danger' : 'badge-warning'}`}
+                      className={`badge ${
+                        log.status === 'success' ? 'badge-success' :
+                        log.status === 'failure' ? 'badge-danger' :
+                        log.status === 'cancelled' ? 'badge-danger' : 'badge-warning'
+                      }`}
                       style={{ fontSize: '12px' }}
                     >
-                      {log.status === 'success' ? 'Sucesso' : log.status === 'failure' ? 'Falha' : 'Executando'}
+                      {log.status === 'success' ? 'Sucesso' :
+                       log.status === 'failure' ? 'Falha' :
+                       log.status === 'cancelled' ? 'Cancelado' : 'Executando'}
                     </span>
                   </div>
 
@@ -524,8 +602,9 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                         <MousePointer size={12} /> Interação Liberada
                       </span>
                     ) : log.status === 'running' ? (
-                      <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#93c5fd', border: '1px solid rgba(59, 130, 246, 0.3)', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <Lock size={12} /> Interação Bloqueada
+                      <span className="browser-robot-badge">
+                        <span className="browser-robot-badge-pulse" />
+                        <Bot size={13} /> Robô em Execução — Interação Desabilitada
                       </span>
                     ) : (
                       <span className="badge badge-success" style={{ fontSize: '11px' }}>
@@ -584,53 +663,23 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                   </div>
                 )}
 
-                {/* Viewport & Screencast Player */}
+                {/* Viewport & Screencast Player (Screen 100% clean and unobstructed) */}
                 <div className="execution-browser-viewport">
                   {log.status === 'running' ? (
-                    <>
-                      <img
-                        key={streamKey}
-                        src={streamUrl}
-                        alt="Transmissão ao vivo do navegador"
-                        className={`execution-stream-image ${manualStep ? 'interactive-enabled' : ''}`}
-                        onClick={handleBrowserClick}
-                        onError={() => {
-                          // Auto-retry stream after brief pause instead of hiding permanently
-                          setTimeout(() => {
-                            setStreamKey(Date.now());
-                          }, 1500);
-                        }}
-                      />
-
-                      {/* Lock Overlay when executing automatic actions (Requirement 1.1) */}
-                      {!manualStep && (
-                        <div className="browser-lock-overlay">
-                          <div className="browser-lock-card">
-                            <div style={{
-                              width: '40px',
-                              height: '40px',
-                              borderRadius: '50%',
-                              background: 'rgba(59, 130, 246, 0.15)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              flexShrink: 0,
-                              border: '1px solid rgba(59, 130, 246, 0.3)'
-                            }}>
-                              <Lock size={18} color="var(--color-primary)" />
-                            </div>
-                            <div>
-                              <div style={{ fontWeight: 600, fontSize: '13px', color: '#fff', marginBottom: '3px' }}>
-                                Execução Automática em Andamento
-                              </div>
-                              <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-                                O robô está controlando a página. O navegador está bloqueado para interação durante as ações automáticas.
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </>
+                    <img
+                      key={streamKey}
+                      src={streamUrl}
+                      alt="Transmissão ao vivo do navegador"
+                      className={`execution-stream-image ${manualStep ? 'interactive-enabled' : 'robot-running'}`}
+                      draggable={false}
+                      onDragStart={(e) => e.preventDefault()}
+                      onClick={handleBrowserClick}
+                      onError={() => {
+                        setTimeout(() => {
+                          setStreamKey(Date.now());
+                        }, 1500);
+                      }}
+                    />
                   ) : (
                     /* Finished Run View: Show final screenshot if available */
                     log.screenshotPath ? (
@@ -638,11 +687,15 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                         src={log.screenshotPath}
                         alt="Captura final do navegador"
                         className="execution-stream-image"
+                        draggable={false}
+                        onDragStart={(e) => e.preventDefault()}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => setSelectedScreenshot(log.screenshotPath)}
                       />
                     ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '13px' }}>
-                        <Eye size={32} color="var(--text-dark)" />
-                        <span>Execução finalizada. Nenhuma captura de tela registrada.</span>
+                      <div className="empty-state" style={{ padding: '40px 20px', color: 'var(--text-muted)' }}>
+                        <Globe size={40} style={{ opacity: 0.25, marginBottom: '12px' }} />
+                        <p style={{ margin: 0, fontSize: '13px' }}>Navegador finalizado sem captura de tela.</p>
                       </div>
                     )
                   )}

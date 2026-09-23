@@ -77,7 +77,14 @@ class SandboxManager {
 
       console.log(`[Sandbox] Launching Chromium (headless: ${this.headless})...`);
 
-      const launchArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'];
+      const launchArgs = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--silent-debugger-extension-api',
+        '--disable-infobars',
+        '--disable-hang-monitor'
+      ];
       if (antiDetection) {
         launchArgs.push('--disable-blink-features=AutomationControlled');
       }
@@ -584,6 +591,33 @@ class SandboxManager {
         error: err.message
       };
     }
+  }
+
+  /**
+   * Dispatches user interaction (click, type, key, scroll) to the sandbox page
+   */
+  async interact({ type, x, y, text, key, deltaY } = {}) {
+    if (!this.page || this.page.isClosed()) {
+      throw new Error('Navegador do Sandbox não está aberto ou foi fechado.');
+    }
+
+    if (type === 'click') {
+      if (typeof x === 'number' && typeof y === 'number') {
+        await this.page.mouse.click(x, y);
+      }
+    } else if (type === 'type') {
+      if (text) {
+        await this.page.keyboard.type(text);
+      }
+    } else if (type === 'key') {
+      if (key) {
+        await this.page.keyboard.press(key);
+      }
+    } else if (type === 'scroll') {
+      await this.page.mouse.wheel(0, deltaY || 100);
+    }
+
+    return { success: true };
   }
 
   /**

@@ -9,7 +9,8 @@ import {
   Play,
   CheckCircle2,
   XCircle,
-  AlertCircle
+  AlertCircle,
+  Square
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useData } from '../../context/DataContext';
@@ -246,8 +247,14 @@ export default function LogsView({ initialLogId, onClearInitialLogId }) {
                     </td>
 
                     <td style={{ padding: '14px 10px' }}>
-                      <span className={`badge ${log.status === 'success' ? 'badge-success' : log.status === 'failure' ? 'badge-danger' : 'badge-warning'}`}>
-                        {log.status === 'success' ? 'Sucesso' : log.status === 'failure' ? 'Falha' : 'Executando'}
+                      <span className={`badge ${
+                        log.status === 'success' ? 'badge-success' :
+                        log.status === 'failure' ? 'badge-danger' :
+                        log.status === 'cancelled' ? 'badge-danger' : 'badge-warning'
+                      }`}>
+                        {log.status === 'success' ? 'Sucesso' :
+                         log.status === 'failure' ? 'Falha' :
+                         log.status === 'cancelled' ? 'Cancelado' : 'Executando'}
                       </span>
                     </td>
 
@@ -260,15 +267,50 @@ export default function LogsView({ initialLogId, onClearInitialLogId }) {
                     </td>
 
                     <td style={{ padding: '14px 10px', textAlign: 'right' }}>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedLogId(log.id);
-                        }}
-                      >
-                        <Eye size={12} /> Detalhar
-                      </button>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        {log.status === 'running' && (
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            style={{
+                              background: 'rgba(239, 68, 68, 0.15)',
+                              border: '1px solid rgba(239, 68, 68, 0.4)',
+                              color: '#f87171',
+                              padding: '4px 8px',
+                              fontSize: '11px',
+                              gap: '4px'
+                            }}
+                            title="Parar execução imediatamente"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              if (!window.confirm(`Deseja interromper a execução de "${log.taskName}"?`)) return;
+                              try {
+                                const res = await apiFetch(`/api/runs/${log.id}/stop`, { method: 'POST' });
+                                if (res.ok) {
+                                  toast.success('Execução Cancelada', 'A execução foi interrompida.');
+                                  fetchLogs(currentPage);
+                                } else {
+                                  const err = await res.json().catch(() => ({}));
+                                  throw new Error(err.error || 'Erro ao parar');
+                                }
+                              } catch (err) {
+                                toast.error('Erro ao parar', err.message);
+                              }
+                            }}
+                          >
+                            <Square size={11} style={{ fill: 'currentColor' }} /> Parar
+                          </button>
+                        )}
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedLogId(log.id);
+                          }}
+                        >
+                          <Eye size={12} /> Detalhar
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

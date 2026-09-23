@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { db } from './db/db.js';
-import { runTask, activeControlSessions, activePromptSessions, activeRunStreams, activeRunPages } from './runner/engine.js';
+import { runTask, stopTaskRun, activeControlSessions, activePromptSessions, activeRunStreams, activeRunPages } from './runner/engine.js';
 import { sandboxManager } from './runner/sandbox.js';
 import { initScheduler, startSchedule, stopSchedule, isValidCron, getNextRun } from './scheduler/cron.js';
 
@@ -729,6 +729,17 @@ app.post('/api/runs/:runId/interact', async (req, res) => {
   }
 });
 
+// POST /api/runs/:runId/stop - Stop/cancel an in-progress pipeline run
+app.post('/api/runs/:runId/stop', async (req, res) => {
+  try {
+    const { runId } = req.params;
+    const result = await stopTaskRun(runId);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- 8. LIVE SANDBOX STUDIO API ---
 
 // POST /api/sandbox/init - Initialize or connect to live sandbox browser
@@ -801,6 +812,16 @@ app.post('/api/sandbox/close', async (req, res) => {
   try {
     await sandboxManager.closeSession();
     res.json({ success: true, message: 'Sandbox fechado com sucesso.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/sandbox/interact - Dispatch clicks/keyboard to sandbox browser
+app.post('/api/sandbox/interact', async (req, res) => {
+  try {
+    const result = await sandboxManager.interact(req.body);
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
