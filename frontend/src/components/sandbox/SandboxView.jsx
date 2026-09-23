@@ -43,6 +43,7 @@ import { useToast } from '../../context/ToastContext';
 import { useData } from '../../context/DataContext';
 import CodeEditor from '../code/CodeEditor';
 import JsonViewer from '../code/JsonViewer';
+import HtmlSourceViewer from './HtmlSourceViewer';
 
 export default function SandboxView({ initialData = null, onClearInitialData = null, onSavedBlock = null }) {
   const { apiFetch } = useAuth();
@@ -72,8 +73,16 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
   const [isResetting, setIsResetting] = useState(false);
   const [streamKey, setStreamKey] = useState(Date.now());
 
-  // Execution States
+  // Right Panel Tabs: 'browser' | 'source' (Requirement 3)
+  const [activeRightTab, setActiveRightTab] = useState('browser');
+  const [pageSource, setPageSource] = useState('');
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [sourceTitle, setSourceTitle] = useState('');
+  const [isLoadingSource, setIsLoadingSource] = useState(false);
+
+  // Execution States & Sequential Step Tracking (Requirement 2)
   const [executingStepIndex, setExecutingStepIndex] = useState(null);
+  const [lastExecutedIndex, setLastExecutedIndex] = useState(-1);
   const [stepResults, setStepResults] = useState({});
   const [isRunningAll, setIsRunningAll] = useState(false);
   const [consoleLogs, setConsoleLogs] = useState([]);
@@ -88,6 +97,7 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
 
   const stepRefs = useRef({});
   const lastProcessedInitialDataRef = useRef(null);
+  const lastExecutedIndexRef = useRef(-1);
 
   const addConsoleLog = useCallback((level, text, details = null) => {
     setConsoleLogs(prev => [
@@ -479,6 +489,30 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
     }
   };
 
+  // Fetch current page source code from sandbox (Requirement 3)
+  const fetchPageSource = useCallback(async (quiet = false) => {
+    setIsLoadingSource(true);
+    try {
+      const res = await apiFetch('/api/sandbox/source');
+      if (res.ok) {
+        const data = await res.json();
+        setPageSource(data.html || '');
+        setSourceUrl(data.url || '');
+        setSourceTitle(data.title || '');
+        if (!quiet) {
+          toast.success('Código Fonte Carregado', `${(data.html || '').split('\n').length.toLocaleString()} linhas do DOM atual.`);
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        if (!quiet) toast.error('Erro ao obter código fonte', err.error || 'Falha na requisição');
+      }
+    } catch (err) {
+      if (!quiet) toast.error('Erro ao obter código fonte', err.message);
+    } finally {
+      setIsLoadingSource(false);
+    }
+  }, [apiFetch, toast]);
+
   // Execute a single step in the live browser
   const handleExecuteStep = async (step, index) => {
     setExecutingStepIndex(index);
@@ -502,15 +536,26 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
       }
 
       if (typeof index === 'number') {
+        lastExecutedIndexRef.current = index;
+        setLastExecutedIndex(index);
         setStepResults(prev => ({ ...prev, [index]: result }));
       }
       if (result.currentUrl) setCurrentUrl(result.currentUrl);
       if (result.title) setPageTitle(result.title);
 
       if (result.success) {
-        addConsoleLog('success', `Ação #${typeof index === 'number' ? index + 1 : 'Direta'} (${step.type}) concluída em ${result.duration}ms`, result.data);
+        if (result.skipped) {
+          addConsoleLog('warn', `Ação #${typeof index === 'number' ? index + 1 : 'Direta'} (${step.type}) ignorada no Sandbox: ${result.data?.message || 'Ação ignorada'}`);
+        } else {
+          addConsoleLog('success', `Ação #${typeof index === 'number' ? index + 1 : 'Direta'} (${step.type}) concluída em ${result.duration}ms`, result.data);
+        }
       } else {
         addConsoleLog('error', `Ação #${typeof index === 'number' ? index + 1 : 'Direta'} (${step.type}) falhou: ${result.error}`);
+      }
+
+      // If source code tab is active, auto-refresh source quietly
+      if (activeRightTab === 'source') {
+        fetchPageSource(true);
       }
 
       return result;
@@ -522,6 +567,8 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
         duration: 0
       };
       if (typeof index === 'number') {
+        lastExecutedIndexRef.current = index;
+        setLastExecutedIndex(index);
         setStepResults(prev => ({ ...prev, [index]: errResult }));
       }
       addConsoleLog('error', `Ação falhou com exceção: ${err.message}`);
@@ -530,6 +577,42 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
       setExecutingStepIndex(null);
     }
   };
+
+  // Execute the next step sequentially (Requirement 2)
+  const handleExecuteNext = useCallback(async () => {
+    if (isRunningAll || executingStepIndex !== null) return;
+    if (!steps || steps.length === 0) {
+      toast.warning('Nenhuma ação', 'Adicione ou importe ações para executar.');
+      return;
+    }
+
+    let nextIndex = lastExecutedIndexRef.current + 1;
+    if (nextIndex >= steps.length || nextIndex < 0) {
+      nextIndex = 0;
+    }
+
+    const step = steps[nextIndex];
+    if (!step) return;
+
+    await handleExecuteStep(step, nextIndex);
+  }, [steps, isRunningAll, executingStepIndex, handleExecuteStep, toast]);
+
+  // Global Keyboard Shortcut: Cmd+Enter (Mac) / Ctrl+Enter (Win/Linux) or F8 (Requirement 2)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const isCmdEnter = (e.metaKey || e.ctrlKey) && e.key === 'Enter';
+      const isF8 = e.key === 'F8';
+
+      if (isCmdEnter || isF8) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleExecuteNext();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleExecuteNext]);
 
   // Execute all steps sequentially
   const handleExecuteAll = async () => {
@@ -682,6 +765,27 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
           >
             <Sliders size={14} />
             Variáveis & Secrets ({Object.keys(testParams).length + Object.keys(testSecrets).length})
+          </button>
+
+          {/* Next Action Sequential Button (Requirement 2) */}
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={handleExecuteNext}
+            disabled={isRunningAll || executingStepIndex !== null || steps.length === 0}
+            title="Executar próxima ação sequencialmente (Atalho: ⌘+Enter ou Ctrl+Enter / F8)"
+            style={{ color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.4)', fontSize: '12px', gap: '6px' }}
+          >
+            <Play size={13} style={{ fill: 'currentColor' }} />
+            <span>Próxima Ação</span>
+            <kbd style={{
+              background: 'rgba(255, 255, 255, 0.1)',
+              padding: '1px 5px',
+              borderRadius: '4px',
+              fontSize: '10px',
+              color: '#bae6fd',
+              marginLeft: '2px'
+            }}>⌘↵</kbd>
           </button>
 
           {/* Run All Button */}
@@ -1064,11 +1168,41 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
 
                         {result && (
                           <span
-                            className={`badge ${result.success ? 'badge-success' : 'badge-danger'}`}
-                            style={{ fontSize: '10px', padding: '2px 6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                            className={`badge ${result.skipped ? 'badge-warning' : (result.success ? 'badge-success' : 'badge-danger')}`}
+                            style={{
+                              fontSize: '10px',
+                              padding: '2px 6px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: result.skipped ? 'rgba(234, 179, 8, 0.15)' : undefined,
+                              color: result.skipped ? '#facc15' : undefined,
+                              border: result.skipped ? '1px solid rgba(234, 179, 8, 0.3)' : undefined
+                            }}
                           >
-                            {result.success ? <CheckCircle2 size={11} /> : <AlertCircle size={11} />}
-                            {result.success ? `${result.duration}ms` : 'Erro'}
+                            {result.skipped ? 'Ignorada' : (result.success ? <CheckCircle2 size={11} /> : <AlertCircle size={11} />)}
+                            {result.skipped ? '' : (result.success ? `${result.duration}ms` : 'Erro')}
+                          </span>
+                        )}
+
+                        {/* Visual indicator for next step in keyboard sequential execution */}
+                        {index === (lastExecutedIndex + 1) && !isRunningAll && executingStepIndex === null && (
+                          <span
+                            className="badge"
+                            style={{
+                              fontSize: '10px',
+                              padding: '2px 6px',
+                              background: 'rgba(56, 189, 248, 0.12)',
+                              color: '#38bdf8',
+                              border: '1px solid rgba(56, 189, 248, 0.3)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px'
+                            }}
+                            title="Próxima ação no atalho ⌘+Enter / F8"
+                          >
+                            <Play size={9} style={{ fill: 'currentColor' }} />
+                            Próxima (⌘↵)
                           </span>
                         )}
                       </div>
@@ -1558,15 +1692,19 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
 
                         {/* Result Display for this Step */}
                         {result && (
-                          <div className={`step-inline-result ${result.success ? 'result-success' : 'result-error'}`}>
+                          <div className={`step-inline-result ${result.skipped ? 'result-skipped' : (result.success ? 'result-success' : 'result-error')}`}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600 }}>
-                                {result.success ? (
+                                {result.skipped ? (
+                                  <span className="badge" style={{ background: 'rgba(234, 179, 8, 0.15)', color: '#facc15', border: '1px solid rgba(234, 179, 8, 0.3)', fontSize: '10px' }}>
+                                    Ação Ignorada
+                                  </span>
+                                ) : result.success ? (
                                   <CheckCircle2 size={13} color="var(--color-success)" />
                                 ) : (
                                   <AlertCircle size={13} color="var(--color-danger)" />
                                 )}
-                                <span>{result.success ? 'Resultado da Ação:' : 'Falha na Execução:'}</span>
+                                <span>{result.skipped ? 'Ação não executada no Sandbox:' : (result.success ? 'Resultado da Ação:' : 'Falha na Execução:')}</span>
                               </div>
                               <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
                                 {result.duration}ms
@@ -1613,94 +1751,137 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
         </div>
 
         {/* ============================================================== */}
-        {/* RIGHT COLUMN: REAL-TIME BROWSER VIEW & CONTROL                 */}
+        {/* RIGHT COLUMN: REAL-TIME BROWSER VIEW & HTML SOURCE CODE        */}
         {/* ============================================================== */}
         <div className={`sandbox-browser-column ${isFullscreenStream ? 'browser-column-fullscreen' : ''}`}>
-          {/* Address & Control Bar */}
-          <div className="sandbox-address-bar">
-            {/* Reset Browser Button (Requirement 1.5) */}
+          {/* Right Column Header Tabs: Navegador (Live) vs Código Fonte (HTML) (Requirement 3) */}
+          <div className="sandbox-panel-tabs">
             <button
               type="button"
-              className="btn btn-secondary btn-sm btn-reset-browser"
-              onClick={handleResetSession}
-              disabled={isResetting}
-              title="Resetar navegador para página em branco e limpar cookies"
+              className={`sandbox-tab-btn ${activeRightTab === 'browser' ? 'active' : ''}`}
+              onClick={() => setActiveRightTab('browser')}
+              title="Exibir transmissão visual do navegador em tempo real"
             >
-              <RotateCcw className={isResetting ? 'spin' : ''} size={14} color="#60a5fa" />
-              <span>Resetar Navegador</span>
+              <Globe size={13} />
+              <span>Navegador em Tempo Real</span>
+              <span className="live-pulse-dot" />
             </button>
+            <button
+              type="button"
+              className={`sandbox-tab-btn ${activeRightTab === 'source' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveRightTab('source');
+                fetchPageSource(true);
+              }}
+              title="Exibir e pesquisar o código fonte HTML (DOM serializado) da página atual"
+            >
+              <Code size={13} />
+              <span>Código Fonte (HTML)</span>
+              {pageSource ? (
+                <span className="tab-count-badge">
+                  {pageSource.split('\n').length.toLocaleString()} l
+                </span>
+              ) : null}
+            </button>
+          </div>
 
-            {/* URL Input Bar */}
-            <form onSubmit={handleNavigateFromBar} style={{ flexGrow: 1, display: 'flex' }}>
-              <div className="sandbox-url-input-container">
-                <Globe size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
-                <input
-                  type="text"
-                  className="sandbox-url-input"
-                  value={navBarUrl}
-                  onChange={e => setNavBarUrl(e.target.value)}
-                  placeholder="https://exemplo.com ou about:blank"
-                />
-                {pageTitle && (
-                  <span className="sandbox-page-title-badge" title={pageTitle}>
-                    {pageTitle}
-                  </span>
+          {activeRightTab === 'browser' ? (
+            <>
+              {/* Address & Control Bar */}
+              <div className="sandbox-address-bar">
+                {/* Reset Browser Button (Requirement 1.5) */}
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm btn-reset-browser"
+                  onClick={handleResetSession}
+                  disabled={isResetting}
+                  title="Resetar navegador para página em branco e limpar cookies"
+                >
+                  <RotateCcw className={isResetting ? 'spin' : ''} size={14} color="#60a5fa" />
+                  <span>Resetar Navegador</span>
+                </button>
+
+                {/* URL Input Bar */}
+                <form onSubmit={handleNavigateFromBar} style={{ flexGrow: 1, display: 'flex' }}>
+                  <div className="sandbox-url-input-container">
+                    <Globe size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                    <input
+                      type="text"
+                      className="sandbox-url-input"
+                      value={navBarUrl}
+                      onChange={e => setNavBarUrl(e.target.value)}
+                      placeholder="https://exemplo.com ou about:blank"
+                    />
+                    {pageTitle && (
+                      <span className="sandbox-page-title-badge" title={pageTitle}>
+                        {pageTitle}
+                      </span>
+                    )}
+                  </div>
+                </form>
+
+                {/* Reload Stream */}
+                <button
+                  type="button"
+                  className="btn-icon-subtle"
+                  onClick={() => setStreamKey(Date.now())}
+                  title="Recarregar transmissão ao vivo"
+                >
+                  <RefreshCw size={14} />
+                </button>
+
+                {/* Fullscreen stream */}
+                <button
+                  type="button"
+                  className="btn-icon-subtle"
+                  onClick={() => setIsFullscreenStream(prev => !prev)}
+                  title={isFullscreenStream ? 'Sair da tela cheia' : 'Expandir transmissão'}
+                >
+                  {isFullscreenStream ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                </button>
+              </div>
+
+              {/* Real-Time Screencast Stream Viewport */}
+              <div className="sandbox-viewport-wrapper">
+                {isInitializing ? (
+                  <div className="sandbox-viewport-loading">
+                    <RefreshCw className="spin" size={32} color="var(--color-primary)" />
+                    <p>Iniciando sessão do Chromium...</p>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      Aguardando conexão com CDP Screencast
+                    </span>
+                  </div>
+                ) : (
+                  <div className="sandbox-viewport-screen">
+                    <img
+                      src={streamUrl}
+                      alt="Navegador em Tempo Real"
+                      className="sandbox-stream-image"
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                        if (e.target.nextElementSibling) {
+                          e.target.nextElementSibling.style.display = 'flex';
+                        }
+                      }}
+                    />
+                    <div className="sandbox-stream-placeholder" style={{ display: 'none' }}>
+                      <Eye size={36} color="var(--text-dark)" />
+                      <p>Aguardando primeiro quadro do navegador...</p>
+                      <span>Execute uma ação de navegação para iniciar a visualização.</span>
+                    </div>
+                  </div>
                 )}
               </div>
-            </form>
-
-            {/* Reload Stream */}
-            <button
-              type="button"
-              className="btn-icon-subtle"
-              onClick={() => setStreamKey(Date.now())}
-              title="Recarregar transmissão ao vivo"
-            >
-              <RefreshCw size={14} />
-            </button>
-
-            {/* Fullscreen stream */}
-            <button
-              type="button"
-              className="btn-icon-subtle"
-              onClick={() => setIsFullscreenStream(prev => !prev)}
-              title={isFullscreenStream ? 'Sair da tela cheia' : 'Expandir transmissão'}
-            >
-              {isFullscreenStream ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-            </button>
-          </div>
-
-          {/* Real-Time Screencast Stream Viewport */}
-          <div className="sandbox-viewport-wrapper">
-            {isInitializing ? (
-              <div className="sandbox-viewport-loading">
-                <RefreshCw className="spin" size={32} color="var(--color-primary)" />
-                <p>Iniciando sessão do Chromium...</p>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                  Aguardando conexão com CDP Screencast
-                </span>
-              </div>
-            ) : (
-              <div className="sandbox-viewport-screen">
-                <img
-                  src={streamUrl}
-                  alt="Navegador em Tempo Real"
-                  className="sandbox-stream-image"
-                  onError={(e) => {
-                    e.target.style.display = 'none';
-                    if (e.target.nextElementSibling) {
-                      e.target.nextElementSibling.style.display = 'flex';
-                    }
-                  }}
-                />
-                <div className="sandbox-stream-placeholder" style={{ display: 'none' }}>
-                  <Eye size={36} color="var(--text-dark)" />
-                  <p>Aguardando primeiro quadro do navegador...</p>
-                  <span>Execute uma ação de navegação para iniciar a visualização.</span>
-                </div>
-              </div>
-            )}
-          </div>
+            </>
+          ) : (
+            <HtmlSourceViewer
+              html={pageSource}
+              url={sourceUrl || currentUrl}
+              title={sourceTitle || pageTitle}
+              isLoading={isLoadingSource}
+              onRefresh={() => fetchPageSource(false)}
+            />
+          )}
 
           {/* Real-time Session Activity Console */}
           <div className="sandbox-console-drawer">

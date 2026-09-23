@@ -239,13 +239,19 @@ class SandboxManager {
       duration: 0,
       data: null,
       error: null,
-      currentUrl: this.page.url()
+      skipped: false,
+      currentUrl: this.page ? this.page.url() : 'about:blank'
     };
 
     try {
       console.log(`[Sandbox] Executing step: ${step.type}`);
 
-      switch (step.type) {
+      let actionType = (step.type || '').trim().toLowerCase();
+      if (actionType === 'take_screenshot') actionType = 'screenshot';
+      if (actionType === 'press_key') actionType = 'keypress';
+      if (actionType === 'dynamic_script') actionType = 'eval';
+
+      switch (actionType) {
         case 'navigate': {
           const rawUrl = step.url || '';
           const url = resolveText(rawUrl, resolvedSecrets, parameters);
@@ -413,14 +419,22 @@ class SandboxManager {
           break;
         }
 
-        default:
-          throw new Error(`Ação não suportada no Sandbox: ${step.type}`);
+        default: {
+          console.warn(`[Sandbox] Ação "${step.type}" não suportada ou ignorada no Sandbox Studio.`);
+          resultLog.skipped = true;
+          resultLog.data = {
+            skipped: true,
+            ignored: true,
+            message: `Ação "${step.type}" não suportada no Sandbox (ignorada com sucesso).`
+          };
+          break;
+        }
       }
 
       resultLog.duration = Math.max(1, Math.round(Date.now() - startTime));
       resultLog.success = true;
-      resultLog.currentUrl = this.page.url();
-      resultLog.title = await this.page.title().catch(() => '');
+      resultLog.currentUrl = this.page ? this.page.url() : 'about:blank';
+      resultLog.title = this.page ? await this.page.title().catch(() => '') : '';
 
       return resultLog;
     } catch (err) {
@@ -496,6 +510,39 @@ class SandboxManager {
       title,
       headless: this.headless
     };
+  }
+
+  /**
+   * Retrieves the current HTML source code and page metadata
+   */
+  async getPageSource() {
+    if (!this.page || this.page.isClosed()) {
+      return { html: '', url: 'about:blank', title: '', isReady: false, lines: 0, length: 0 };
+    }
+    try {
+      const html = await this.page.content();
+      const url = this.page.url();
+      const title = await this.page.title().catch(() => '');
+      return {
+        html,
+        url,
+        title,
+        isReady: true,
+        length: html.length,
+        lines: html.split('\n').length
+      };
+    } catch (err) {
+      console.error('[Sandbox] Failed to retrieve page source:', err);
+      return {
+        html: '',
+        url: this.page ? this.page.url() : 'about:blank',
+        title: '',
+        isReady: false,
+        lines: 0,
+        length: 0,
+        error: err.message
+      };
+    }
   }
 
   /**

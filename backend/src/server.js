@@ -720,6 +720,16 @@ app.get('/api/sandbox/state', async (req, res) => {
   }
 });
 
+// GET /api/sandbox/source - Get current HTML DOM and page metadata from sandbox
+app.get('/api/sandbox/source', async (req, res) => {
+  try {
+    const sourceData = await sandboxManager.getPageSource();
+    res.json(sourceData);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // POST /api/sandbox/close - Close sandbox browser
 app.post('/api/sandbox/close', async (req, res) => {
   try {
