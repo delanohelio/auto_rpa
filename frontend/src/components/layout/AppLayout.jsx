@@ -46,7 +46,14 @@ export default function AppLayout({
           onToggleSidebar={toggleSidebar}
         />
 
-        <main className="main-content" style={{ flexGrow: 1, overflowY: 'auto' }}>
+        <main
+          className={`main-content ${activeTab === 'sandbox' ? 'main-content-sandbox' : ''}`}
+          style={{
+            flexGrow: 1,
+            overflowY: activeTab === 'sandbox' ? 'hidden' : 'auto',
+            padding: activeTab === 'sandbox' ? '12px 18px 14px' : undefined
+          }}
+        >
           {children}
         </main>
       </div>

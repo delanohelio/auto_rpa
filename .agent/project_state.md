@@ -9,7 +9,7 @@
   - Design: `Cyberpunk Dark Theme + Glassmorphism + Modal System 2.0`
 - **Current Phase**: `COMPLETE`
 - **Active Persona**: `web-dev-orchestrator`
-- **Last Updated**: 2026-09-23 14:35
+- **Last Updated**: 2026-09-23 14:55
 
 ## 🎯 Project Goals & Scope
 - **Goal 1 (UX & Navigation 2.0)**: Decompose monolithic 2,979-line `App.jsx` into focused, high-performance modular components. Introduce Command Palette (⌘K), browser history URL synchronization, breadcrumbs, non-blocking toast notifications, and fluid micro-transitions.
@@ -38,6 +38,12 @@
   - Importação automática de parâmetros padrão de blocos e substituições configuradas na pipeline.
   - Resolução automática de secrets confidenciais protegidos no cofre criptografado (AES-256) com fallback transparente se não sobrescritos.
   - Painel/Gaveta com abas **Variáveis (Parâmetros)** e **Secrets** para criar, editar, alternar visibilidade de senhas (`Eye`/`EyeOff`) e testar valores em tempo de execução.
+- **Goal 11 (Sandbox Scroll Ajustado, Modos de Importação e Correção de Loop)**:
+  - Eliminação de duplo scroll na tela do Sandbox (`.main-content-sandbox { overflow: hidden; }`) e prevenção do encolhimento de cards com `flex-shrink: 0;`.
+  - Adição de recolher/expandir individual por card e global ("Expandir Todas" / "Recolher Todas"), além de visualizador de resumo em uma linha (`getStepSummary`).
+  - Suporte completo a todos os tipos de etapa em cards (`conditional_if`, `extract_html`, `user_prompt`, `agent_control`, `dynamic_script`, etc.).
+  - Diálogo de modo de importação: quando há ações no Studio, pergunta se deseja Substituir, Adicionar no início ou Adicionar no final; quando o Studio está vazio, importa diretamente.
+  - Resolução definitiva do loop infinito de importação estabilizando `ToastContext` com `useMemo` e consumindo `initialData` com `onClearInitialData`.
 
 ## 📋 Phase Progress Tracker
 - [x] **Phase 1: Discovery & Scope**
@@ -49,6 +55,7 @@
   - [x] Modal System 2.0 layout and clean 2-column grid (`.step-col-full`).
   - [x] 2-column Live Sandbox Studio layout and screencast styles.
   - [x] Compact sidebar styles (`.sidebar.collapsed`, `74px 1fr` grid transition, `.sidebar-collapse-btn`).
+  - [x] Import mode conflict modal styles (`.import-mode-card`, `.import-mode-icon`).
 - [x] **Phase 3: Architecture & Contracts**
   - [x] Shared API contracts documented in `.agent/architecture_contracts.md`.
   - [x] Backend routes and DB helpers implemented (`/api/system/stats`, `/api/runs/active`, paginated logs, `secretKeyRenames` in `POST /api/blocks`).
@@ -70,6 +77,9 @@
   - [x] Pipeline import modal & sequential step unrolling with block origin badges in Sandbox.
   - [x] Editable Sandbox Variables & Secrets 2-tab drawer.
   - [x] "Testar no Sandbox" buttons in `TasksView` cards and Command Palette.
+  - [x] ToastContext stability (`useMemo`) and `onClearInitialData` to eliminate render loops.
+  - [x] Import conflict modal (Substituir / Início / Final / Cancelar) and zero-action auto-import.
+  - [x] Step card collapse toggles, full step-type field support, and smooth auto-scroll.
 - [x] **Phase 5: Quality Gate & Code Review**
   - [x] Production build verified (`npm run build`).
   - [x] Endpoints and DB persistence tests verified.

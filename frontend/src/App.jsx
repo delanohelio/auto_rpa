@@ -139,6 +139,7 @@ function AppContent() {
       {activeTab === 'sandbox' && (
         <SandboxView
           initialData={sandboxInitialData}
+          onClearInitialData={() => setSandboxInitialData(null)}
           onSavedBlock={() => {
             setSandboxInitialData(null);
             handleNavigate('blocks');

@@ -35,7 +35,8 @@ import {
   Workflow,
   Lock,
   FolderInput,
-  Key
+  Key,
+  X
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -43,7 +44,7 @@ import { useData } from '../../context/DataContext';
 import CodeEditor from '../code/CodeEditor';
 import JsonViewer from '../code/JsonViewer';
 
-export default function SandboxView({ initialData = null, onSavedBlock = null }) {
+export default function SandboxView({ initialData = null, onClearInitialData = null, onSavedBlock = null }) {
   const { apiFetch } = useAuth();
   const toast = useToast();
   const { blocks, tasks, saveBlock } = useData();
@@ -52,10 +53,8 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
   const [sourceType, setSourceType] = useState('custom'); // 'custom' | 'block' | 'pipeline'
   const [blockName, setBlockName] = useState('Novo Bloco de Teste');
   const [blockDesc, setBlockDesc] = useState('Testado e validado no Sandbox Studio');
-  const [steps, setSteps] = useState([
-    { type: 'navigate', url: 'https://example.com' },
-    { type: 'eval', script: '(() => {\n  return { title: document.title, url: window.location.href };\n})()' }
-  ]);
+  const [steps, setSteps] = useState([]);
+  const [collapsedSteps, setCollapsedSteps] = useState({});
 
   // Test Variables & Secrets State
   const [testParams, setTestParams] = useState({});
@@ -80,22 +79,44 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
   const [consoleLogs, setConsoleLogs] = useState([]);
   const [isFullscreenStream, setIsFullscreenStream] = useState(false);
 
-  // Modals
+  // Modals & Import State
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importModalTab, setImportModalTab] = useState('pipelines'); // 'pipelines' | 'blocks'
+  const [pendingImport, setPendingImport] = useState(null);
 
-  // Load from Pipeline or Block source
-  const loadSource = useCallback((source) => {
-    if (!source) return;
+  const stepRefs = useRef({});
+  const lastProcessedInitialDataRef = useRef(null);
+
+  const addConsoleLog = useCallback((level, text, details = null) => {
+    setConsoleLogs(prev => [
+      {
+        id: Date.now() + Math.random(),
+        time: new Date().toLocaleTimeString(),
+        level,
+        text,
+        details
+      },
+      ...prev.slice(0, 49)
+    ]);
+  }, []);
+
+  // Auto-scroll to active running step
+  useEffect(() => {
+    if (executingStepIndex !== null && stepRefs.current[executingStepIndex]) {
+      try {
+        stepRefs.current[executingStepIndex].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } catch (_) {}
+    }
+  }, [executingStepIndex]);
+
+  // Extract steps, params and secrets from Pipeline or Block source
+  const extractSourceData = useCallback((source) => {
+    if (!source || !source.data) return null;
 
     if (source.type === 'pipeline') {
       const pipeline = source.data;
-      setSourceType('pipeline');
-      setBlockName(`Pipeline: ${pipeline.name}`);
-      setBlockDesc(pipeline.description || 'Sequência importada da pipeline para depuração');
-
       const extractedSteps = [];
       const extractedParams = {};
       const extractedSecrets = {};
@@ -137,20 +158,17 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
         });
       });
 
-      setSteps(extractedSteps.length > 0 ? extractedSteps : [
-        { type: 'navigate', url: 'https://example.com' }
-      ]);
-      setTestParams(extractedParams);
-      setTestSecrets(extractedSecrets);
-      setStepResults({});
-      addConsoleLog('info', `Pipeline "${pipeline.name}" importada com ${extractedSteps.length} ações em sequência.`);
-      toast.success('Pipeline Carregada', `${extractedSteps.length} ações sequenciadas para teste.`);
+      return {
+        type: 'pipeline',
+        name: pipeline.name,
+        title: `Pipeline: ${pipeline.name}`,
+        description: pipeline.description || 'Sequência importada da pipeline para depuração',
+        steps: extractedSteps,
+        params: extractedParams,
+        secrets: extractedSecrets
+      };
     } else if (source.type === 'block') {
       const block = source.data;
-      setSourceType('block');
-      setBlockName(block.name || 'Bloco Importado');
-      setBlockDesc(block.description || 'Importado para teste no Sandbox');
-
       const extractedSteps = (block.steps || []).map((st, idx) => ({
         ...JSON.parse(JSON.stringify(st)),
         sourceBlockName: block.name,
@@ -168,7 +186,6 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
         extractedSecrets[sKey] = '';
       });
 
-      // Interactive prompt vars
       (block.steps || []).forEach(st => {
         if (st.type === 'user_prompt' && Array.isArray(st.vars)) {
           st.vars.forEach(v => {
@@ -179,23 +196,88 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
         }
       });
 
-      setSteps(extractedSteps.length > 0 ? extractedSteps : [
-        { type: 'navigate', url: 'https://example.com' }
-      ]);
-      setTestParams(extractedParams);
-      setTestSecrets(extractedSecrets);
-      setStepResults({});
-      addConsoleLog('info', `Bloco "${block.name}" importado com ${extractedSteps.length} ações.`);
-      toast.success('Bloco Carregado', `Bloco "${block.name}" pronto para teste.`);
+      return {
+        type: 'block',
+        name: block.name,
+        title: block.name || 'Bloco Importado',
+        description: block.description || 'Importado para teste no Sandbox',
+        steps: extractedSteps,
+        params: extractedParams,
+        secrets: extractedSecrets
+      };
     }
-  }, [blocks, toast]);
 
-  // Load initialData when passed
-  useEffect(() => {
-    if (initialData) {
-      loadSource(initialData);
+    return null;
+  }, [blocks]);
+
+  // Apply parsed import data according to mode ('replace' | 'prepend' | 'append')
+  const applyImport = useCallback((parsed, mode) => {
+    if (!parsed) return;
+
+    if (mode === 'replace') {
+      setSourceType(parsed.type);
+      setBlockName(parsed.title);
+      setBlockDesc(parsed.description);
+      setSteps(parsed.steps);
+      setTestParams(parsed.params);
+      setTestSecrets(parsed.secrets);
+      setStepResults({});
+      setCollapsedSteps({});
+      addConsoleLog('info', `${parsed.type === 'pipeline' ? 'Pipeline' : 'Bloco'} "${parsed.name}" importado (${parsed.steps.length} ações substituídas).`);
+      toast.success('Ações Importadas', `Substituídas ${parsed.steps.length} ações no Studio.`);
+    } else if (mode === 'prepend') {
+      setSteps(prev => [...parsed.steps, ...prev]);
+      setTestParams(prev => ({ ...prev, ...parsed.params }));
+      setTestSecrets(prev => ({ ...prev, ...parsed.secrets }));
+      setCollapsedSteps({});
+      addConsoleLog('info', `${parsed.steps.length} ações de "${parsed.name}" inseridas no início.`);
+      toast.success('Ações Adicionadas no Início', `${parsed.steps.length} ações inseridas antes das existentes.`);
+    } else if (mode === 'append') {
+      setSteps(prev => [...prev, ...parsed.steps]);
+      setTestParams(prev => ({ ...prev, ...parsed.params }));
+      setTestSecrets(prev => ({ ...prev, ...parsed.secrets }));
+      setCollapsedSteps({});
+      addConsoleLog('info', `${parsed.steps.length} ações de "${parsed.name}" adicionadas ao final.`);
+      toast.success('Ações Adicionadas ao Final', `${parsed.steps.length} ações anexadas após as existentes.`);
     }
-  }, [initialData, loadSource]);
+
+    setPendingImport(null);
+    setShowImportModal(false);
+    if (onClearInitialData) onClearInitialData();
+  }, [addConsoleLog, toast, onClearInitialData]);
+
+  // Request import: checks if studio already has actions
+  const requestImport = useCallback((source) => {
+    const parsed = extractSourceData(source);
+    if (!parsed) return;
+
+    // Requirement 2.1: se não tiver nenhuma ação no studio, importar diretamente;
+    if (steps.length === 0) {
+      applyImport(parsed, 'replace');
+    } else {
+      // Requirement 2: perguntar se quer substituir, adicionar no início ou adicionar no final
+      setPendingImport(parsed);
+      setShowImportModal(false);
+    }
+  }, [steps.length, extractSourceData, applyImport]);
+
+  // Load initialData when passed (e.g. from BlocksView or TasksView) without loops
+  useEffect(() => {
+    if (initialData && initialData !== lastProcessedInitialDataRef.current) {
+      lastProcessedInitialDataRef.current = initialData;
+      const parsed = extractSourceData(initialData);
+      if (parsed) {
+        if (steps.length === 0) {
+          applyImport(parsed, 'replace');
+        } else {
+          setPendingImport(parsed);
+        }
+      }
+      if (onClearInitialData) {
+        onClearInitialData();
+      }
+    }
+  }, [initialData, extractSourceData, steps.length, applyImport, onClearInitialData]);
 
   // Initialize or connect to sandbox session
   const initSession = useCallback(async (desiredHeadless = headless) => {
@@ -219,7 +301,7 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
     } finally {
       setIsInitializing(false);
     }
-  }, [apiFetch, headless, toast]);
+  }, [apiFetch, headless, toast, addConsoleLog]);
 
   // Check state on mount
   useEffect(() => {
@@ -243,19 +325,6 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
     };
     checkState();
   }, []);
-
-  const addConsoleLog = (level, text, details = null) => {
-    setConsoleLogs(prev => [
-      {
-        id: Date.now() + Math.random(),
-        time: new Date().toLocaleTimeString(),
-        level,
-        text,
-        details
-      },
-      ...prev.slice(0, 49)
-    ]);
-  };
 
   // Reset Browser Session
   const handleResetSession = async () => {
@@ -354,6 +423,60 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
       copy[targetIdx] = temp;
       return copy;
     });
+  };
+
+  const toggleStepCollapse = (idx) => {
+    setCollapsedSteps(prev => ({ ...prev, [idx]: !prev[idx] }));
+  };
+
+  const expandAllSteps = () => {
+    setCollapsedSteps({});
+  };
+
+  const collapseAllSteps = () => {
+    const all = {};
+    steps.forEach((_, idx) => { all[idx] = true; });
+    setCollapsedSteps(all);
+  };
+
+  const getStepSummary = (step) => {
+    if (!step) return '';
+    switch (step.type) {
+      case 'navigate':
+        return `Navegar: ${step.url || 'https://...'}`;
+      case 'click':
+        return `Clicar: ${step.selector || 'sem seletor'} (${step.selector_type || 'id'}, ${step.click_type || 'single'})`;
+      case 'type': {
+        const preview = step.text ? (step.text.length > 25 ? `${step.text.substring(0, 25)}...` : step.text) : 'vazio';
+        return `Digitar em ${step.selector || 'campo'}: "${preview}"`;
+      }
+      case 'select':
+        return `Selecionar em ${step.selector || 'select'}: "${step.value || ''}"`;
+      case 'wait':
+        return `Aguardar: ${step.condition === 'element' ? `elemento ${step.selector}` : `${step.timeout || 2}s`}`;
+      case 'keypress':
+        return `Tecla: ${step.key || 'Enter'}`;
+      case 'eval': {
+        const firstLine = (step.script || '').split('\n')[0].trim();
+        return `Executar JS: ${firstLine ? (firstLine.length > 30 ? firstLine.substring(0, 30) + '...' : firstLine) : 'script'}`;
+      }
+      case 'dynamic_script':
+        return `Script Dinâmico`;
+      case 'list_elements':
+        return `Listar: ${step.query_selector || 'elementos'}`;
+      case 'screenshot':
+        return `Screenshot: ${step.name || 'captura'}`;
+      case 'conditional_if':
+        return `Condição se existe: ${step.selector_exists || step.selector || ''}`;
+      case 'extract_html':
+        return `Extrair HTML${step.selector ? ` de ${step.selector}` : ' da página'}`;
+      case 'user_prompt':
+        return `Prompt: ${step.message || 'Variáveis'}`;
+      case 'agent_control':
+        return `Handoff IA: ${(step.instruction || '').substring(0, 30)}...`;
+      default:
+        return `Ação: ${step.type}`;
+    }
   };
 
   // Execute a single step in the live browser
@@ -809,34 +932,64 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
 
           {/* Action Palette Bar */}
           <div className="sandbox-palette-bar">
-            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-              Adicionar Ação:
-            </span>
-            <div className="sandbox-palette-buttons">
-              <button type="button" className="palette-btn" onClick={() => addStep('navigate')}>
-                <Globe size={12} color="#60a5fa" /> + Navegar
-              </button>
-              <button type="button" className="palette-btn" onClick={() => addStep('click')}>
-                <MousePointer size={12} color="#34d399" /> + Clicar
-              </button>
-              <button type="button" className="palette-btn" onClick={() => addStep('type')}>
-                <Type size={12} color="#facc15" /> + Digitar
-              </button>
-              <button type="button" className="palette-btn" onClick={() => addStep('select')}>
-                <CheckSquare size={12} color="#a78bfa" /> + Selecionar
-              </button>
-              <button type="button" className="palette-btn" onClick={() => addStep('wait')}>
-                <Clock size={12} color="#f472b6" /> + Esperar
-              </button>
-              <button type="button" className="palette-btn" onClick={() => addStep('eval')}>
-                <Code size={12} color="#38bdf8" /> + Executar JS
-              </button>
-              <button type="button" className="palette-btn" onClick={() => addStep('list_elements')}>
-                <FileText size={12} color="#fbbf24" /> + Extrair Texto
-              </button>
-              <button type="button" className="palette-btn" onClick={() => addStep('screenshot')}>
-                <Camera size={12} color="#e879f9" /> + Screenshot
-              </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', flexGrow: 1 }}>
+              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                Adicionar Ação:
+              </span>
+              <div className="sandbox-palette-buttons">
+                <button type="button" className="palette-btn" onClick={() => addStep('navigate')}>
+                  <Globe size={12} color="#60a5fa" /> + Navegar
+                </button>
+                <button type="button" className="palette-btn" onClick={() => addStep('click')}>
+                  <MousePointer size={12} color="#34d399" /> + Clicar
+                </button>
+                <button type="button" className="palette-btn" onClick={() => addStep('type')}>
+                  <Type size={12} color="#facc15" /> + Digitar
+                </button>
+                <button type="button" className="palette-btn" onClick={() => addStep('select')}>
+                  <CheckSquare size={12} color="#a78bfa" /> + Selecionar
+                </button>
+                <button type="button" className="palette-btn" onClick={() => addStep('wait')}>
+                  <Clock size={12} color="#f472b6" /> + Esperar
+                </button>
+                <button type="button" className="palette-btn" onClick={() => addStep('eval')}>
+                  <Code size={12} color="#38bdf8" /> + Executar JS
+                </button>
+                <button type="button" className="palette-btn" onClick={() => addStep('list_elements')}>
+                  <FileText size={12} color="#fbbf24" /> + Extrair Texto
+                </button>
+                <button type="button" className="palette-btn" onClick={() => addStep('screenshot')}>
+                  <Camera size={12} color="#e879f9" /> + Screenshot
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto' }}>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                {steps.length} {steps.length === 1 ? 'ação' : 'ações'}
+              </span>
+              {steps.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    className="palette-btn"
+                    style={{ fontSize: '10px', padding: '3px 8px' }}
+                    onClick={expandAllSteps}
+                    title="Expandir todas as ações"
+                  >
+                    Expandir
+                  </button>
+                  <button
+                    type="button"
+                    className="palette-btn"
+                    style={{ fontSize: '10px', padding: '3px 8px' }}
+                    onClick={collapseAllSteps}
+                    title="Recolher todas as ações"
+                  >
+                    Recolher
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
@@ -844,26 +997,50 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
           <div className="sandbox-steps-list">
             {steps.length === 0 ? (
               <div className="sandbox-empty-steps">
-                <FlaskConical size={32} color="var(--text-dark)" />
-                <p>Nenhuma ação adicionada nesta sequência de teste.</p>
-                <span>Utilize a paleta acima para adicionar etapas ou clique em "Importar..." para carregar uma pipeline.</span>
+                <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(59, 130, 246, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
+                  <FlaskConical size={24} color="#60a5fa" />
+                </div>
+                <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--text-light)' }}>Nenhuma ação configurada no Studio</h4>
+                <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)', maxWidth: '360px' }}>
+                  Adicione ações usando a paleta acima, ou clique em <strong>"Importar..."</strong> para testar um bloco ou pipeline completo.
+                </p>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                  <button type="button" className="btn btn-outline btn-sm" onClick={() => setShowImportModal(true)}>
+                    <FolderInput size={13} /> Importar Pipeline / Bloco
+                  </button>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => addStep('navigate')}>
+                    <Plus size={13} /> Adicionar Primeira Ação
+                  </button>
+                </div>
               </div>
             ) : (
               steps.map((step, index) => {
                 const isExecuting = executingStepIndex === index;
                 const result = stepResults[index];
+                const isCollapsed = !!collapsedSteps[index];
 
                 return (
                   <div
                     key={index}
+                    ref={el => { stepRefs.current[index] = el; }}
                     className={`sandbox-step-card ${isExecuting ? 'step-executing' : ''} ${result ? (result.success ? 'step-success' : 'step-failed') : ''}`}
                   >
                     {/* Step Card Header */}
                     <div className="step-card-header">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className="btn-icon-subtle"
+                          style={{ padding: '2px' }}
+                          onClick={() => toggleStepCollapse(index)}
+                          title={isCollapsed ? "Expandir detalhes da ação" : "Recolher detalhes da ação"}
+                        >
+                          {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                        </button>
+
                         <span className="step-card-index">{index + 1}</span>
 
-                        {/* Source Block Badge (Requirement 2: visual source tracking for pipelines) */}
+                        {/* Source Block Badge */}
                         {step.sourceBlockName && (
                           <span
                             className="badge"
@@ -898,7 +1075,6 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
 
                       {/* Step Actions */}
                       <div className="step-card-actions">
-                        {/* Execute Action Button (Requirement 1.3 & 1.4) */}
                         <button
                           type="button"
                           className="btn-step-run"
@@ -914,7 +1090,6 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
                           <span>Executar Ação</span>
                         </button>
 
-                        {/* Move Up */}
                         <button
                           type="button"
                           className="btn-icon-subtle"
@@ -925,7 +1100,6 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
                           <ArrowUp size={13} />
                         </button>
 
-                        {/* Move Down */}
                         <button
                           type="button"
                           className="btn-icon-subtle"
@@ -936,7 +1110,6 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
                           <ArrowDown size={13} />
                         </button>
 
-                        {/* Delete */}
                         <button
                           type="button"
                           className="btn-icon-subtle btn-danger-hover"
@@ -948,341 +1121,490 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
                       </div>
                     </div>
 
-                    {/* Step Card Config Fields */}
-                    <div className="step-card-body">
-                      {/* Navigate */}
-                      {step.type === 'navigate' && (
-                        <div className="form-group mb-0">
-                          <label style={{ fontSize: '11px' }}>URL de Destino</label>
-                          <input
-                            type="text"
-                            className="form-control"
-                            style={{ fontSize: '12px', padding: '6px 10px' }}
-                            placeholder="https://exemplo.com ou {{url_param}}"
-                            value={step.url || ''}
-                            onChange={e => updateStep(index, 'url', e.target.value)}
-                          />
-                        </div>
-                      )}
-
-                      {/* Click */}
-                      {step.type === 'click' && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: '8px' }}>
-                          <div>
-                            <label style={{ fontSize: '11px' }}>Seletor do Elemento</label>
+                    {/* Collapsed Step Preview */}
+                    {isCollapsed ? (
+                      <div
+                        style={{
+                          padding: '7px 12px',
+                          fontSize: '11px',
+                          color: 'var(--text-muted)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          background: 'rgba(0,0,0,0.1)'
+                        }}
+                        onClick={() => toggleStepCollapse(index)}
+                      >
+                        <span style={{ color: 'var(--text-light)', fontFamily: 'var(--font-mono)' }}>
+                          {getStepSummary(step)}
+                        </span>
+                        <span style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--color-primary)' }}>
+                          Clique para editar
+                        </span>
+                      </div>
+                    ) : (
+                      /* Expanded Step Body */
+                      <div className="step-card-body">
+                        {/* Navigate */}
+                        {step.type === 'navigate' && (
+                          <div className="form-group mb-0">
+                            <label style={{ fontSize: '11px' }}>URL de Destino</label>
                             <input
                               type="text"
                               className="form-control"
                               style={{ fontSize: '12px', padding: '6px 10px' }}
-                              placeholder="#botao-entrar ou .submit-btn"
-                              value={step.selector || ''}
-                              onChange={e => updateStep(index, 'selector', e.target.value)}
+                              placeholder="https://exemplo.com ou {{url_param}}"
+                              value={step.url || ''}
+                              onChange={e => updateStep(index, 'url', e.target.value)}
                             />
                           </div>
-                          <div>
-                            <label style={{ fontSize: '11px' }}>Tipo de Seletor</label>
-                            <select
-                              className="form-control"
-                              style={{ fontSize: '12px', padding: '6px 10px' }}
-                              value={step.selector_type || 'id'}
-                              onChange={e => updateStep(index, 'selector_type', e.target.value)}
-                            >
-                              <option value="id">ID (#)</option>
-                              <option value="css">CSS Seletor</option>
-                              <option value="xpath">XPath</option>
-                              <option value="name">Atributo name</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label style={{ fontSize: '11px' }}>Clique</label>
-                            <select
-                              className="form-control"
-                              style={{ fontSize: '12px', padding: '6px 10px' }}
-                              value={step.click_type || 'single'}
-                              onChange={e => updateStep(index, 'click_type', e.target.value)}
-                            >
-                              <option value="single">Clique Simples</option>
-                              <option value="double">Duplo Clique</option>
-                            </select>
-                          </div>
-                        </div>
-                      )}
+                        )}
 
-                      {/* Type */}
-                      {step.type === 'type' && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1.5fr', gap: '8px' }}>
-                          <div>
-                            <label style={{ fontSize: '11px' }}>Seletor do Campo</label>
-                            <input
-                              type="text"
-                              className="form-control"
-                              style={{ fontSize: '12px', padding: '6px 10px' }}
-                              placeholder="#campo-email"
-                              value={step.selector || ''}
-                              onChange={e => updateStep(index, 'selector', e.target.value)}
-                            />
-                          </div>
-                          <div>
-                            <label style={{ fontSize: '11px' }}>Tipo Seletor</label>
-                            <select
-                              className="form-control"
-                              style={{ fontSize: '12px', padding: '6px 10px' }}
-                              value={step.selector_type || 'id'}
-                              onChange={e => updateStep(index, 'selector_type', e.target.value)}
-                            >
-                              <option value="id">ID (#)</option>
-                              <option value="css">CSS Seletor</option>
-                              <option value="xpath">XPath</option>
-                              <option value="name">Atributo name</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label style={{ fontSize: '11px' }}>Texto ou Valor {`{{param}}`}</label>
-                            <input
-                              type="text"
-                              className="form-control"
-                              style={{ fontSize: '12px', padding: '6px 10px' }}
-                              placeholder="Digite o texto ou {{senha}}"
-                              value={step.text || ''}
-                              onChange={e => updateStep(index, 'text', e.target.value)}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Select Option */}
-                      {step.type === 'select' && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1.2fr', gap: '8px' }}>
-                          <div>
-                            <label style={{ fontSize: '11px' }}>Seletor do Select</label>
-                            <input
-                              type="text"
-                              className="form-control"
-                              style={{ fontSize: '12px', padding: '6px 10px' }}
-                              placeholder="#meu-select"
-                              value={step.selector || ''}
-                              onChange={e => updateStep(index, 'selector', e.target.value)}
-                            />
-                          </div>
-                          <div>
-                            <label style={{ fontSize: '11px' }}>Tipo Seletor</label>
-                            <select
-                              className="form-control"
-                              style={{ fontSize: '12px', padding: '6px 10px' }}
-                              value={step.selector_type || 'id'}
-                              onChange={e => updateStep(index, 'selector_type', e.target.value)}
-                            >
-                              <option value="id">ID (#)</option>
-                              <option value="css">CSS Seletor</option>
-                              <option value="xpath">XPath</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label style={{ fontSize: '11px' }}>Valor da Opção (value ou label)</label>
-                            <input
-                              type="text"
-                              className="form-control"
-                              style={{ fontSize: '12px', padding: '6px 10px' }}
-                              placeholder="ex: SP ou Opção 1"
-                              value={step.value || ''}
-                              onChange={e => updateStep(index, 'value', e.target.value)}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Wait */}
-                      {step.type === 'wait' && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.5fr 1fr', gap: '8px' }}>
-                          <div>
-                            <label style={{ fontSize: '11px' }}>Tipo de Espera</label>
-                            <select
-                              className="form-control"
-                              style={{ fontSize: '12px', padding: '6px 10px' }}
-                              value={step.condition || 'time'}
-                              onChange={e => updateStep(index, 'condition', e.target.value)}
-                            >
-                              <option value="time">Tempo Fixo (segundos)</option>
-                              <option value="element">Elemento Ficar Visível</option>
-                              <option value="load">Carregamento Completo (DOM)</option>
-                            </select>
-                          </div>
-
-                          {step.condition === 'element' ? (
+                        {/* Click */}
+                        {step.type === 'click' && (
+                          <div className="sandbox-step-grid-3">
                             <div>
                               <label style={{ fontSize: '11px' }}>Seletor do Elemento</label>
                               <input
                                 type="text"
                                 className="form-control"
                                 style={{ fontSize: '12px', padding: '6px 10px' }}
-                                placeholder="#conteudo-carregado"
+                                placeholder="#botao-entrar ou .submit-btn"
                                 value={step.selector || ''}
                                 onChange={e => updateStep(index, 'selector', e.target.value)}
                               />
                             </div>
-                          ) : (
-                            <div />
-                          )}
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Tipo de Seletor</label>
+                              <select
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                value={step.selector_type || 'id'}
+                                onChange={e => updateStep(index, 'selector_type', e.target.value)}
+                              >
+                                <option value="id">ID (#)</option>
+                                <option value="css">CSS Seletor</option>
+                                <option value="xpath">XPath</option>
+                                <option value="name">Atributo name</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Clique</label>
+                              <select
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                value={step.click_type || 'single'}
+                                onChange={e => updateStep(index, 'click_type', e.target.value)}
+                              >
+                                <option value="single">Clique Simples</option>
+                                <option value="double">Duplo Clique</option>
+                              </select>
+                            </div>
+                          </div>
+                        )}
 
+                        {/* Type */}
+                        {step.type === 'type' && (
+                          <div className="sandbox-step-grid-3">
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Seletor do Campo</label>
+                              <input
+                                type="text"
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                placeholder="#campo-email"
+                                value={step.selector || ''}
+                                onChange={e => updateStep(index, 'selector', e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Tipo Seletor</label>
+                              <select
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                value={step.selector_type || 'id'}
+                                onChange={e => updateStep(index, 'selector_type', e.target.value)}
+                              >
+                                <option value="id">ID (#)</option>
+                                <option value="css">CSS Seletor</option>
+                                <option value="xpath">XPath</option>
+                                <option value="name">Atributo name</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Texto ou Valor {`{{param}}`}</label>
+                              <input
+                                type="text"
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                placeholder="Digite o texto ou {{senha}}"
+                                value={step.text || ''}
+                                onChange={e => updateStep(index, 'text', e.target.value)}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Select Option */}
+                        {step.type === 'select' && (
+                          <div className="sandbox-step-grid-3">
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Seletor do Select</label>
+                              <input
+                                type="text"
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                placeholder="#meu-select"
+                                value={step.selector || ''}
+                                onChange={e => updateStep(index, 'selector', e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Tipo Seletor</label>
+                              <select
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                value={step.selector_type || 'id'}
+                                onChange={e => updateStep(index, 'selector_type', e.target.value)}
+                              >
+                                <option value="id">ID (#)</option>
+                                <option value="css">CSS Seletor</option>
+                                <option value="xpath">XPath</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Valor da Opção (value)</label>
+                              <input
+                                type="text"
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                placeholder="ex: SP ou Opção 1"
+                                value={step.value || ''}
+                                onChange={e => updateStep(index, 'value', e.target.value)}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Wait */}
+                        {step.type === 'wait' && (
+                          <div className="sandbox-step-grid-3">
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Tipo de Espera</label>
+                              <select
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                value={step.condition || 'time'}
+                                onChange={e => updateStep(index, 'condition', e.target.value)}
+                              >
+                                <option value="time">Tempo Fixo (segundos)</option>
+                                <option value="element">Elemento Ficar Visível</option>
+                                <option value="load">Carregamento Completo (DOM)</option>
+                                <option value="networkidle">Rede Ociosa (Network Idle)</option>
+                              </select>
+                            </div>
+
+                            {step.condition === 'element' ? (
+                              <div>
+                                <label style={{ fontSize: '11px' }}>Seletor do Elemento</label>
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  style={{ fontSize: '12px', padding: '6px 10px' }}
+                                  placeholder="#conteudo-carregado"
+                                  value={step.selector || ''}
+                                  onChange={e => updateStep(index, 'selector', e.target.value)}
+                                />
+                              </div>
+                            ) : (
+                              <div />
+                            )}
+
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Segundos</label>
+                              <input
+                                type="number"
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                value={step.timeout ?? 2}
+                                onChange={e => updateStep(index, 'timeout', parseFloat(e.target.value) || 0)}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Keypress */}
+                        {step.type === 'keypress' && (
+                          <div className="sandbox-step-grid-2">
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Tecla a Pressionar</label>
+                              <select
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                value={step.key || 'Enter'}
+                                onChange={e => updateStep(index, 'key', e.target.value)}
+                              >
+                                <option value="Enter">Enter</option>
+                                <option value="Tab">Tab</option>
+                                <option value="Escape">Escape</option>
+                                <option value="ArrowDown">Seta para Baixo</option>
+                                <option value="ArrowUp">Seta para Cima</option>
+                                <option value="Backspace">Backspace</option>
+                              </select>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Eval / JS Execution */}
+                        {step.type === 'eval' && (
                           <div>
-                            <label style={{ fontSize: '11px' }}>Segundos</label>
-                            <input
-                              type="number"
-                              className="form-control"
-                              style={{ fontSize: '12px', padding: '6px 10px' }}
-                              value={step.timeout ?? 2}
-                              onChange={e => updateStep(index, 'timeout', parseFloat(e.target.value) || 0)}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                              <label style={{ fontSize: '11px', margin: 0 }}>Script JavaScript de Avaliação</label>
+                              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                                O que for retornado será exibido abaixo e no log
+                              </span>
+                            </div>
+                            <CodeEditor
+                              value={step.script || ''}
+                              onChange={code => updateStep(index, 'script', code)}
+                              language="javascript"
+                              rows={4}
+                              placeholder="(() => {\n  return document.title;\n})()"
+                            />
+                            <div style={{ marginTop: '6px' }}>
+                              <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                                Salvar retorno em arquivo de download (opcional):
+                              </label>
+                              <input
+                                type="text"
+                                className="form-control"
+                                style={{ fontSize: '11px', padding: '4px 8px' }}
+                                placeholder="ex: relatorio.json"
+                                value={step.output_file || ''}
+                                onChange={e => updateStep(index, 'output_file', e.target.value)}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Dynamic Script */}
+                        {step.type === 'dynamic_script' && (
+                          <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                              <label style={{ fontSize: '11px', margin: 0 }}>Script Dinâmico (Browser Context)</label>
+                            </div>
+                            <CodeEditor
+                              value={step.script || ''}
+                              onChange={code => updateStep(index, 'script', code)}
+                              language="javascript"
+                              rows={4}
+                              placeholder="// Código JS a ser executado no navegador"
                             />
                           </div>
-                        </div>
-                      )}
+                        )}
 
-                      {/* Keypress */}
-                      {step.type === 'keypress' && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '8px' }}>
+                        {/* List Elements / Extract Text */}
+                        {step.type === 'list_elements' && (
+                          <div className="sandbox-step-grid-2">
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Seletor CSS dos Elementos</label>
+                              <input
+                                type="text"
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                placeholder=".item-titulo ou table tbody tr"
+                                value={step.query_selector || ''}
+                                onChange={e => updateStep(index, 'query_selector', e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Tipo</label>
+                              <select
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                value={step.selector_type || 'css'}
+                                onChange={e => updateStep(index, 'selector_type', e.target.value)}
+                              >
+                                <option value="css">CSS</option>
+                                <option value="xpath">XPath</option>
+                              </select>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Conditional If */}
+                        {step.type === 'conditional_if' && (
+                          <div className="sandbox-step-grid-2">
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Verificar se Elemento Existe</label>
+                              <input
+                                type="text"
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                placeholder="#popup-fechar ou .alerta"
+                                value={step.selector_exists || step.selector || ''}
+                                onChange={e => {
+                                  updateStep(index, 'selector_exists', e.target.value);
+                                  updateStep(index, 'selector', e.target.value);
+                                }}
+                              />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Tipo Seletor</label>
+                              <select
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                value={step.selector_type || 'css'}
+                                onChange={e => updateStep(index, 'selector_type', e.target.value)}
+                              >
+                                <option value="css">CSS Seletor</option>
+                                <option value="id">ID (#)</option>
+                                <option value="xpath">XPath</option>
+                              </select>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Extract HTML */}
+                        {step.type === 'extract_html' && (
+                          <div className="sandbox-step-grid-2">
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Seletor do Elemento (Opcional)</label>
+                              <input
+                                type="text"
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                placeholder="Deixe em branco para extrair a página inteira"
+                                value={step.selector || ''}
+                                onChange={e => updateStep(index, 'selector', e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '11px' }}>Tipo Seletor</label>
+                              <select
+                                className="form-control"
+                                style={{ fontSize: '12px', padding: '6px 10px' }}
+                                value={step.selector_type || 'css'}
+                                onChange={e => updateStep(index, 'selector_type', e.target.value)}
+                              >
+                                <option value="css">CSS Seletor</option>
+                                <option value="id">ID (#)</option>
+                                <option value="xpath">XPath</option>
+                              </select>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* User Prompt */}
+                        {step.type === 'user_prompt' && (
                           <div>
-                            <label style={{ fontSize: '11px' }}>Tecla a Pressionar</label>
-                            <select
-                              className="form-control"
-                              style={{ fontSize: '12px', padding: '6px 10px' }}
-                              value={step.key || 'Enter'}
-                              onChange={e => updateStep(index, 'key', e.target.value)}
-                            >
-                              <option value="Enter">Enter</option>
-                              <option value="Tab">Tab</option>
-                              <option value="Escape">Escape</option>
-                              <option value="ArrowDown">Seta para Baixo</option>
-                              <option value="ArrowUp">Seta para Cima</option>
-                              <option value="Backspace">Backspace</option>
-                            </select>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Eval / JS Execution */}
-                      {step.type === 'eval' && (
-                        <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                            <label style={{ fontSize: '11px', margin: 0 }}>Script JavaScript de Avaliação</label>
-                            <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                              O que for retornado será exibido abaixo e no log
-                            </span>
-                          </div>
-                          <CodeEditor
-                            value={step.script || ''}
-                            onChange={code => updateStep(index, 'script', code)}
-                            language="javascript"
-                            rows={4}
-                            placeholder="(() => {\n  return document.title;\n})()"
-                          />
-                          <div style={{ marginTop: '6px' }}>
-                            <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                              Salvar retorno em arquivo de download (opcional):
-                            </label>
+                            <label style={{ fontSize: '11px' }}>Mensagem do Prompt Interativo</label>
                             <input
                               type="text"
                               className="form-control"
-                              style={{ fontSize: '11px', padding: '4px 8px' }}
-                              placeholder="ex: relatorio.json"
-                              value={step.output_file || ''}
-                              onChange={e => updateStep(index, 'output_file', e.target.value)}
+                              style={{ fontSize: '12px', padding: '6px 10px' }}
+                              placeholder="ex: Por favor, informe os dados necessários"
+                              value={step.message || ''}
+                              onChange={e => updateStep(index, 'message', e.target.value)}
+                            />
+                            {Array.isArray(step.vars) && step.vars.length > 0 && (
+                              <div style={{ marginTop: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                                Variáveis solicitadas: {step.vars.map(v => v.name).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Agent Control */}
+                        {step.type === 'agent_control' && (
+                          <div>
+                            <label style={{ fontSize: '11px' }}>Instrução para Agente de IA</label>
+                            <textarea
+                              className="form-control"
+                              style={{ fontSize: '12px', padding: '6px 10px', resize: 'vertical' }}
+                              rows={2}
+                              placeholder="Descreva a tarefa que a IA deve realizar nesta página"
+                              value={step.instruction || step.prompt || ''}
+                              onChange={e => updateStep(index, 'instruction', e.target.value)}
                             />
                           </div>
-                        </div>
-                      )}
+                        )}
 
-                      {/* List Elements / Extract Text */}
-                      {step.type === 'list_elements' && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '8px' }}>
+                        {/* Screenshot */}
+                        {step.type === 'screenshot' && (
                           <div>
-                            <label style={{ fontSize: '11px' }}>Seletor CSS dos Elementos</label>
+                            <label style={{ fontSize: '11px' }}>Nome da Captura</label>
                             <input
                               type="text"
                               className="form-control"
                               style={{ fontSize: '12px', padding: '6px 10px' }}
-                              placeholder=".item-titulo ou table tbody tr"
-                              value={step.query_selector || ''}
-                              onChange={e => updateStep(index, 'query_selector', e.target.value)}
+                              placeholder="ex: tela_inicial"
+                              value={step.name || ''}
+                              onChange={e => updateStep(index, 'name', e.target.value)}
                             />
                           </div>
+                        )}
+
+                        {/* Fallback for any other custom step */}
+                        {!['navigate', 'click', 'type', 'select', 'wait', 'keypress', 'eval', 'dynamic_script', 'list_elements', 'screenshot', 'conditional_if', 'extract_html', 'user_prompt', 'agent_control'].includes(step.type) && (
                           <div>
-                            <label style={{ fontSize: '11px' }}>Tipo</label>
-                            <select
-                              className="form-control"
-                              style={{ fontSize: '12px', padding: '6px 10px' }}
-                              value={step.selector_type || 'css'}
-                              onChange={e => updateStep(index, 'selector_type', e.target.value)}
-                            >
-                              <option value="css">CSS</option>
-                              <option value="xpath">XPath</option>
-                            </select>
+                            <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Configuração da Ação ({step.type})</label>
+                            <pre style={{ margin: 0, padding: '8px', background: 'rgba(0,0,0,0.3)', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-mono)' }}>
+                              {JSON.stringify(step, null, 2)}
+                            </pre>
                           </div>
-                        </div>
-                      )}
+                        )}
 
-                      {/* Screenshot */}
-                      {step.type === 'screenshot' && (
-                        <div>
-                          <label style={{ fontSize: '11px' }}>Nome da Captura</label>
-                          <input
-                            type="text"
-                            className="form-control"
-                            style={{ fontSize: '12px', padding: '6px 10px' }}
-                            placeholder="ex: tela_inicial"
-                            value={step.name || ''}
-                            onChange={e => updateStep(index, 'name', e.target.value)}
-                          />
-                        </div>
-                      )}
-
-                      {/* Result Display for this Step */}
-                      {result && (
-                        <div className={`step-inline-result ${result.success ? 'result-success' : 'result-error'}`}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600 }}>
-                              {result.success ? (
-                                <CheckCircle2 size={13} color="var(--color-success)" />
-                              ) : (
-                                <AlertCircle size={13} color="var(--color-danger)" />
-                              )}
-                              <span>{result.success ? 'Resultado da Ação:' : 'Falha na Execução:'}</span>
+                        {/* Result Display for this Step */}
+                        {result && (
+                          <div className={`step-inline-result ${result.success ? 'result-success' : 'result-error'}`}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600 }}>
+                                {result.success ? (
+                                  <CheckCircle2 size={13} color="var(--color-success)" />
+                                ) : (
+                                  <AlertCircle size={13} color="var(--color-danger)" />
+                                )}
+                                <span>{result.success ? 'Resultado da Ação:' : 'Falha na Execução:'}</span>
+                              </div>
+                              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                                {result.duration}ms
+                              </span>
                             </div>
-                            <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                              {result.duration}ms
-                            </span>
-                          </div>
 
-                          {result.error && (
-                            <div style={{ fontSize: '11px', color: '#f87171', fontFamily: 'var(--font-mono)' }}>
-                              {result.error}
-                            </div>
-                          )}
+                            {result.error && (
+                              <div style={{ fontSize: '11px', color: '#f87171', fontFamily: 'var(--font-mono)' }}>
+                                {result.error}
+                              </div>
+                            )}
 
-                          {result.data && (
-                            <div style={{ fontSize: '11px', color: 'var(--text-light)', marginTop: '4px' }}>
-                              {result.data.message && <div>{result.data.message}</div>}
-                              {result.data.returnValue !== undefined && (
-                                <div style={{ marginTop: '6px', background: 'rgba(0,0,0,0.4)', padding: '6px', borderRadius: '4px' }}>
-                                  <div style={{ fontSize: '10px', color: '#60a5fa', fontWeight: 600, marginBottom: '2px' }}>
-                                    Retorno (Eval / Script):
+                            {result.data && (
+                              <div style={{ fontSize: '11px', color: 'var(--text-light)', marginTop: '4px' }}>
+                                {result.data.message && <div>{result.data.message}</div>}
+                                {result.data.returnValue !== undefined && (
+                                  <div style={{ marginTop: '6px', background: 'rgba(0,0,0,0.4)', padding: '6px', borderRadius: '4px' }}>
+                                    <div style={{ fontSize: '10px', color: '#60a5fa', fontWeight: 600, marginBottom: '2px' }}>
+                                      Retorno (Eval / Script):
+                                    </div>
+                                    <pre style={{ margin: 0, fontSize: '11px', fontFamily: 'var(--font-mono)', maxHeight: '120px', overflowY: 'auto' }}>
+                                      {typeof result.data.returnValue === 'object'
+                                        ? JSON.stringify(result.data.returnValue, null, 2)
+                                        : String(result.data.returnValue)}
+                                    </pre>
                                   </div>
-                                  <pre style={{ margin: 0, fontSize: '11px', fontFamily: 'var(--font-mono)', maxHeight: '120px', overflowY: 'auto' }}>
-                                    {typeof result.data.returnValue === 'object'
-                                      ? JSON.stringify(result.data.returnValue, null, 2)
-                                      : String(result.data.returnValue)}
-                                  </pre>
-                                </div>
-                              )}
-                              {Array.isArray(result.data.items) && (
-                                <div style={{ marginTop: '4px', fontSize: '10px', color: '#facc15' }}>
-                                  {result.data.items.length} itens extraídos da página
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                                )}
+                                {Array.isArray(result.data.items) && (
+                                  <div style={{ marginTop: '4px', fontSize: '10px', color: '#facc15' }}>
+                                    {result.data.items.length} itens extraídos da página
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -1523,8 +1845,7 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
                         className="list-item"
                         style={{ padding: '10px 14px', cursor: 'pointer' }}
                         onClick={() => {
-                          loadSource({ type: 'pipeline', data: task });
-                          setShowImportModal(false);
+                          requestImport({ type: 'pipeline', data: task });
                         }}
                       >
                         <div style={{ flexGrow: 1 }}>
@@ -1557,8 +1878,7 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
                         className="list-item"
                         style={{ padding: '10px 14px', cursor: 'pointer' }}
                         onClick={() => {
-                          loadSource({ type: 'block', data: blk });
-                          setShowImportModal(false);
+                          requestImport({ type: 'block', data: blk });
                         }}
                       >
                         <div style={{ flexGrow: 1 }}>
@@ -1586,6 +1906,93 @@ export default function SandboxView({ initialData = null, onSavedBlock = null })
                 onClick={() => setShowImportModal(false)}
               >
                 Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Requirement 2: Conflict / Import Mode Selection Modal */}
+      {pendingImport && (
+        <div className="modal-overlay" style={{ zIndex: 1300 }}>
+          <div className="modal-content" style={{ maxWidth: '520px', width: '92%' }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div className="sandbox-badge-logo" style={{ background: 'rgba(168, 85, 247, 0.15)', borderColor: 'rgba(168, 85, 247, 0.3)' }}>
+                  <FolderInput size={18} color="#c084fc" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '15px', color: 'var(--text-light)' }}>Como deseja importar as ações?</h3>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Importando <strong>{pendingImport.name}</strong> ({pendingImport.steps.length} {pendingImport.steps.length === 1 ? 'ação' : 'ações'})
+                  </span>
+                </div>
+              </div>
+              <button type="button" className="btn-icon-subtle" onClick={() => setPendingImport(null)} title="Fechar">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px 20px' }}>
+              <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-light)' }}>
+                O Studio já contém <strong>{steps.length}</strong> {steps.length === 1 ? 'ação configurada' : 'ações configuradas'}. Escolha o que deseja fazer com as <strong>{pendingImport.steps.length}</strong> novas ações:
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '4px' }}>
+                {/* Option 1: Substituir */}
+                <button
+                  type="button"
+                  className="import-mode-card"
+                  onClick={() => applyImport(pendingImport, 'replace')}
+                >
+                  <div className="import-mode-icon" style={{ background: 'rgba(239, 68, 68, 0.12)', color: '#f87171' }}>
+                    <RotateCcw size={18} />
+                  </div>
+                  <div style={{ flexGrow: 1, textAlign: 'left' }}>
+                    <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text-light)' }}>Substituir Todas as Ações</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Limpa a sequência atual e carrega apenas as {pendingImport.steps.length} ações importadas.</div>
+                  </div>
+                </button>
+
+                {/* Option 2: Adicionar no Início */}
+                <button
+                  type="button"
+                  className="import-mode-card"
+                  onClick={() => applyImport(pendingImport, 'prepend')}
+                >
+                  <div className="import-mode-icon" style={{ background: 'rgba(59, 130, 246, 0.12)', color: '#60a5fa' }}>
+                    <ArrowUp size={18} />
+                  </div>
+                  <div style={{ flexGrow: 1, textAlign: 'left' }}>
+                    <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text-light)' }}>Adicionar no Início</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Insere as {pendingImport.steps.length} novas ações antes das ações existentes no Studio.</div>
+                  </div>
+                </button>
+
+                {/* Option 3: Adicionar no Final */}
+                <button
+                  type="button"
+                  className="import-mode-card"
+                  onClick={() => applyImport(pendingImport, 'append')}
+                >
+                  <div className="import-mode-icon" style={{ background: 'rgba(34, 197, 94, 0.12)', color: '#4ade80' }}>
+                    <ArrowDown size={18} />
+                  </div>
+                  <div style={{ flexGrow: 1, textAlign: 'left' }}>
+                    <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text-light)' }}>Adicionar no Final</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Anexa as {pendingImport.steps.length} novas ações após as ações existentes no Studio.</div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setPendingImport(null)}
+              >
+                Cancelar
               </button>
             </div>
           </div>
