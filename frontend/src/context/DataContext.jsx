@@ -250,11 +250,17 @@ export function DataProvider({ children }) {
     }
   };
 
-  const triggerTaskRun = async (taskId, parameterOverrides = {}, runtimeVars = {}, skipVars = []) => {
+  const triggerTaskRun = async (taskId, parameterOverrides = {}, runtimeVars = {}, skipVars = [], options = {}) => {
     try {
       const res = await apiFetch(`/api/tasks/${taskId}/run`, {
         method: 'POST',
-        body: JSON.stringify({ parameterOverrides, runtimeVars, skipVars })
+        body: JSON.stringify({
+          parameterOverrides,
+          runtimeVars,
+          skipVars,
+          headless: options.headless,
+          liveView: options.liveView
+        })
       });
       if (!res.ok) {
         const err = await res.json();
@@ -271,11 +277,17 @@ export function DataProvider({ children }) {
     }
   };
 
-  const triggerScheduleRun = async (scheduleId, parameterOverrides = {}, runtimeVars = {}, skipVars = []) => {
+  const triggerScheduleRun = async (scheduleId, parameterOverrides = {}, runtimeVars = {}, skipVars = [], options = {}) => {
     try {
       const res = await apiFetch(`/api/schedules/${scheduleId}/run`, {
         method: 'POST',
-        body: JSON.stringify({ parameterOverrides, runtimeVars, skipVars })
+        body: JSON.stringify({
+          parameterOverrides,
+          runtimeVars,
+          skipVars,
+          headless: options.headless,
+          liveView: options.liveView
+        })
       });
       if (!res.ok) {
         const err = await res.json();

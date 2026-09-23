@@ -28,11 +28,14 @@ export const activeControlSessions = new Map();
 // Active interactive user prompt sessions map
 export const activePromptSessions = new Map();
 
+// Active real-time screencast streams for pipeline runs
+export const activeRunStreams = new Map();
+
 
 /**
  * Replace secret and parameter references in text
  */
-function resolveText(text, decryptedSecrets = {}, mergedParams = {}) {
+export function resolveText(text, decryptedSecrets = {}, mergedParams = {}) {
   if (typeof text !== 'string') return text;
   
   // 1. Resolve parameters first
@@ -83,7 +86,7 @@ function hasCssSpecifiers(selector) {
 /**
  * Convert user click selectors into Playwright selector syntax
  */
-function getPlaywrightSelector(selector, type) {
+export function getPlaywrightSelector(selector, type) {
   if (!selector) return '';
   const trimmed = selector.trim();
 
@@ -143,7 +146,8 @@ export async function runTask(
   runtimeVars = {},
   skipVars = [],
   trigger = 'manual',
-  scheduleId = null
+  scheduleId = null,
+  options = {}
 ) {
   const startedAt = new Date().toISOString();
   const task = db.getTask(taskId);
@@ -169,6 +173,14 @@ export async function runTask(
     throw new Error(errorRecord.error);
   }
 
+  const isHeadless = options.headless !== undefined
+    ? Boolean(options.headless)
+    : (process.env.HEADLESS !== 'false');
+
+  const isLiveView = options.liveView !== undefined
+    ? Boolean(options.liveView)
+    : true;
+
   const logRecord = {
     id: runId,
     taskId: task.id,
@@ -184,7 +196,9 @@ export async function runTask(
     currentStepIndex: -1,
     error: null,
     stepsExecuted: [],
-    screenshotPath: null
+    screenshotPath: null,
+    headless: isHeadless,
+    liveView: isLiveView
   };
 
   // Pre-load all action blocks with instance values to ensure they exist before starting browser
@@ -228,18 +242,19 @@ export async function runTask(
   let context = null;
   let page = null;
   let skipNextStep = false;
+  let runStream = null;
 
   try {
-    console.log(`Starting execution of Task: "${task.name}" (${taskId})`);
+    console.log(`Starting execution of Task: "${task.name}" (${taskId}) - Headless: ${isHeadless}, LiveView: ${isLiveView}`);
     
     const launchArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'];
     if (task.antiDetection) {
       launchArgs.push('--disable-blink-features=AutomationControlled');
     }
 
-    // Launch headless chromium with sandbox disable args for Docker container compatibility
+    // Launch chromium with user-selected headless mode
     browser = await chromium.launch({
-      headless: process.env.HEADLESS !== 'false',
+      headless: isHeadless,
       args: launchArgs
     });
 
@@ -278,8 +293,44 @@ export async function runTask(
       });
     }
 
-
     page = await context.newPage();
+
+    // Start live screencast stream if requested
+    if (isLiveView) {
+      runStream = {
+        clients: new Set(),
+        lastFrame: null,
+        cdp: null
+      };
+      activeRunStreams.set(runId, runStream);
+
+      try {
+        const cdp = await context.newCDPSession(page);
+        runStream.cdp = cdp;
+        await cdp.send('Page.startScreencast', {
+          format: 'jpeg',
+          quality: 75,
+          maxWidth: 1280,
+          maxHeight: 720,
+          everyNthFrame: 1
+        });
+
+        cdp.on('Page.screencastFrame', async ({ data, sessionId }) => {
+          try { await cdp.send('Page.screencastFrameAck', { sessionId }); } catch (_) {}
+          const buffer = Buffer.from(data, 'base64');
+          runStream.lastFrame = buffer;
+          for (const sendFrame of runStream.clients) {
+            try { sendFrame(buffer); } catch (_) {}
+          }
+        });
+
+        page.screenshot({ type: 'jpeg', quality: 75 }).then(buf => {
+          runStream.lastFrame = buf;
+        }).catch(() => {});
+      } catch (screencastErr) {
+        console.warn(`[Engine] Could not start CDP screencast for run ${runId}:`, screencastErr.message);
+      }
+    }
 
     // Iterate through modules (blocks)
     for (let bIndex = 0; bIndex < blocks.length; bIndex++) {
@@ -749,6 +800,15 @@ export async function runTask(
     const endedAt = new Date().toISOString();
     logRecord.endedAt = endedAt;
     logRecord.duration = Math.round((new Date(endedAt) - new Date(startedAt)) / 1000);
+
+    // Close CDP screencast stream if active
+    if (activeRunStreams.has(runId)) {
+      const stream = activeRunStreams.get(runId);
+      if (stream.cdp) {
+        try { await stream.cdp.detach(); } catch (_) {}
+      }
+      activeRunStreams.delete(runId);
+    }
 
     // Close browser resources
     if (context) await context.close().catch(() => {});

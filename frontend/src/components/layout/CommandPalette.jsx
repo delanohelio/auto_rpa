@@ -10,7 +10,8 @@ import {
   Play,
   ArrowRight,
   Database,
-  Trash2
+  Trash2,
+  FlaskConical
 } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 
@@ -37,6 +38,7 @@ export default function CommandPalette({ isOpen, onClose, onNavigate, onTriggerT
     const navItems = [
       { id: 'nav_dashboard', title: 'Ir para Dashboard', group: 'Navegação', icon: LayoutDashboard, action: () => onNavigate('dashboard') },
       { id: 'nav_blocks', title: 'Ir para Blocos de Ação', group: 'Navegação', icon: Boxes, action: () => onNavigate('blocks') },
+      { id: 'nav_sandbox', title: 'Ir para Live Sandbox Studio (Teste em Tempo Real)', group: 'Navegação', icon: FlaskConical, action: () => onNavigate('sandbox') },
       { id: 'nav_tasks', title: 'Ir para Pipelines (Tarefas)', group: 'Navegação', icon: Workflow, action: () => onNavigate('tasks') },
       { id: 'nav_scheduler', title: 'Ir para Agendamentos Cron', group: 'Navegação', icon: Calendar, action: () => onNavigate('scheduler') },
       { id: 'nav_logs', title: 'Ir para Histórico de Execuções', group: 'Navegação', icon: FileText, action: () => onNavigate('logs') },

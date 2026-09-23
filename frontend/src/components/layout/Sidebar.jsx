@@ -6,7 +6,8 @@ import {
   Calendar,
   FileText,
   Settings,
-  Bot
+  Bot,
+  FlaskConical
 } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 
@@ -20,6 +21,13 @@ export default function Sidebar({ activeTab, onSelectTab }) {
       label: 'Blocos de Ação',
       icon: Boxes,
       badge: blocks.length > 0 ? blocks.length : null
+    },
+    {
+      id: 'sandbox',
+      label: 'Live Sandbox',
+      icon: FlaskConical,
+      badge: 'Studio',
+      badgeColor: 'var(--color-primary)'
     },
     {
       id: 'tasks',

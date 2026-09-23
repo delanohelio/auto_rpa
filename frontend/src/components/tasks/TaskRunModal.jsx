@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { XCircle, Play, HelpCircle } from 'lucide-react';
+import { XCircle, Play, HelpCircle, Monitor, Eye } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 
 export default function TaskRunModal({ task, onStartRun, onClose }) {
   const { blocks } = useData();
   const [runOverrides, setRunOverrides] = useState({});
+  const [browserMode, setBrowserMode] = useState('headless'); // 'headless' | 'headed'
+  const [liveView, setLiveView] = useState(true);
   const [runTaskVars, setRunTaskVars] = useState(() => {
     const promptVars = {};
     if (task && task.blocks) {
@@ -44,7 +46,10 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
       .filter(([_, isSkip]) => isSkip)
       .map(([vName]) => vName);
 
-    onStartRun(cleanedOverrides, runTaskVars, cleanedSkipList);
+    onStartRun(cleanedOverrides, runTaskVars, cleanedSkipList, {
+      headless: browserMode === 'headless',
+      liveView
+    });
     onClose();
   };
 
@@ -56,12 +61,106 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
           <h3 className="modal-title">Configurar Execução: {task.name}</h3>
           <XCircle className="modal-close" size={24} onClick={onClose} />
           <p className="text-muted" style={{ fontSize: '13px', margin: '8px 0 0' }}>
-            Defina valores temporários para os parâmetros desta rodada. Se deixados em branco, o sistema usará as configurações padrão da pipeline.
+            Defina o modo de navegação, visualização ao vivo e valores de parâmetros para esta rodada.
           </p>
         </div>
 
         {/* Scrollable Body */}
         <div className="modal-body">
+          {/* Browser Mode & Live View Config Card */}
+          <div
+            style={{
+              padding: '14px 16px',
+              background: 'rgba(59, 130, 246, 0.04)',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid rgba(59, 130, 246, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Monitor size={16} color="var(--color-primary)" />
+                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-light)' }}>
+                  Modo do Navegador
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontSize: '12px',
+                    padding: '5px 10px',
+                    borderRadius: '6px',
+                    background: browserMode === 'headless' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                    border: browserMode === 'headless' ? '1px solid var(--color-primary)' : '1px solid var(--border-color)',
+                    cursor: 'pointer',
+                    color: browserMode === 'headless' ? '#93c5fd' : 'var(--text-muted)'
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="browserMode"
+                    value="headless"
+                    checked={browserMode === 'headless'}
+                    onChange={() => setBrowserMode('headless')}
+                    style={{ margin: 0 }}
+                  />
+                  Headless (Segundo Plano)
+                </label>
+
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontSize: '12px',
+                    padding: '5px 10px',
+                    borderRadius: '6px',
+                    background: browserMode === 'headed' ? 'rgba(168, 85, 247, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                    border: browserMode === 'headed' ? '1px solid #a855f7' : '1px solid var(--border-color)',
+                    cursor: 'pointer',
+                    color: browserMode === 'headed' ? '#d8b4fe' : 'var(--text-muted)'
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="browserMode"
+                    value="headed"
+                    checked={browserMode === 'headed'}
+                    onChange={() => setBrowserMode('headed')}
+                    style={{ margin: 0 }}
+                  />
+                  Headed (Com Janela Visual)
+                </label>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Eye size={15} color="var(--color-secondary)" />
+                <span style={{ fontSize: '12px', color: 'var(--text-light)' }}>
+                  Acompanhar Navegador ao Vivo (Screencast em Tempo Real)
+                </span>
+              </div>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', margin: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={liveView}
+                  onChange={e => setLiveView(e.target.checked)}
+                />
+                <span style={{ color: liveView ? 'var(--color-primary)' : 'var(--text-muted)', fontWeight: 600 }}>
+                  {liveView ? 'Ativo' : 'Desativado'}
+                </span>
+              </label>
+            </div>
+          </div>
+
           {/* Blocks parameters override */}
           {(task.blocks || []).map((instance, index) => {
             const block = blocks.find(b => b.id === instance.blockId);

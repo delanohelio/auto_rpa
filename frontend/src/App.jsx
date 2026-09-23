@@ -13,6 +13,7 @@ import TasksView from './components/tasks/TasksView';
 import SchedulerView from './components/scheduler/SchedulerView';
 import LogsView from './components/logs/LogsView';
 import SystemView from './components/system/SystemView';
+import SandboxView from './components/sandbox/SandboxView';
 import TaskRunModal from './components/tasks/TaskRunModal';
 
 function AppContent() {
@@ -30,6 +31,7 @@ function AppContent() {
     return params.get('id') || null;
   });
 
+  const [sandboxInitialBlock, setSandboxInitialBlock] = useState(null);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [quickRunTask, setQuickRunTask] = useState(null);
 
@@ -89,6 +91,9 @@ function AppContent() {
     if (activeTab === 'logs') {
       return `Execução: ${activeId.substring(0, 8)}...`;
     }
+    if (activeTab === 'sandbox') {
+      return 'Testes & Execução em Tempo Real';
+    }
     return null;
   }, [activeTab, activeId, blocks, tasks]);
 
@@ -124,6 +129,20 @@ function AppContent() {
         <BlocksView
           initialEditingId={activeId}
           onClearInitialEditingId={() => setActiveId(null)}
+          onTestInSandbox={(block) => {
+            setSandboxInitialBlock(block);
+            handleNavigate('sandbox');
+          }}
+        />
+      )}
+
+      {activeTab === 'sandbox' && (
+        <SandboxView
+          initialBlock={sandboxInitialBlock}
+          onSavedBlock={() => {
+            setSandboxInitialBlock(null);
+            handleNavigate('blocks');
+          }}
         />
       )}
 
@@ -164,8 +183,8 @@ function AppContent() {
       {quickRunTask && (
         <TaskRunModal
           task={quickRunTask}
-          onStartRun={async (overrides, runtimeVars, skipVars) => {
-            await triggerTaskRun(quickRunTask.id, overrides, runtimeVars, skipVars);
+          onStartRun={async (overrides, runtimeVars, skipVars, options) => {
+            await triggerTaskRun(quickRunTask.id, overrides, runtimeVars, skipVars, options);
             setQuickRunTask(null);
             handleNavigate('logs');
           }}

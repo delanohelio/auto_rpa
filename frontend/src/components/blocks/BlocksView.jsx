@@ -10,14 +10,15 @@ import {
   Link,
   Search,
   Bot,
-  Code
+  Code,
+  FlaskConical
 } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
 import BlockEditorModal from './BlockEditorModal';
 import CodeViewer from '../code/CodeViewer';
 
-export default function BlocksView({ initialEditingId, onClearInitialEditingId }) {
+export default function BlocksView({ initialEditingId, onClearInitialEditingId, onTestInSandbox }) {
   const { blocks, saveBlock, deleteBlock } = useData();
   const toast = useToast();
 
@@ -195,6 +196,14 @@ export default function BlocksView({ initialEditingId, onClearInitialEditingId }
                       title="Exportar arquivo JSON"
                     >
                       <Download size={13} />
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => onTestInSandbox?.(block)}
+                      title="Abrir e Testar Ações no Sandbox Studio"
+                      style={{ color: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.4)' }}
+                    >
+                      <FlaskConical size={13} /> Testar no Sandbox
                     </button>
                     <button
                       className="btn btn-secondary btn-sm"

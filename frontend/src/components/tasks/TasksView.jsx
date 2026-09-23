@@ -82,10 +82,10 @@ export default function TasksView({ initialEditingId, onClearInitialEditingId, o
     toast.success('Link Copiado', 'Endpoint da API copiado para a área de transferência.');
   };
 
-  const handleStartTaskRun = async (overrides, runtimeVars, skipVars) => {
+  const handleStartTaskRun = async (overrides, runtimeVars, skipVars, options) => {
     if (!runningTask) return;
     try {
-      await triggerTaskRun(runningTask.id, overrides, runtimeVars, skipVars);
+      await triggerTaskRun(runningTask.id, overrides, runtimeVars, skipVars, options);
       setRunningTask(null);
       onNavigateToLogs?.();
     } catch (_) {}

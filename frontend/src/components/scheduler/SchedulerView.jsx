@@ -28,10 +28,10 @@ export default function SchedulerView({ onNavigateToLogs }) {
     } catch (_) {}
   };
 
-  const handleStartScheduleRun = async (overrides, runtimeVars, skipVars) => {
+  const handleStartScheduleRun = async (overrides, runtimeVars, skipVars, options) => {
     if (!runningSchedule) return;
     try {
-      await triggerScheduleRun(runningSchedule.id, overrides, runtimeVars, skipVars);
+      await triggerScheduleRun(runningSchedule.id, overrides, runtimeVars, skipVars, options);
       setRunningSchedule(null);
       onNavigateToLogs?.();
     } catch (_) {}

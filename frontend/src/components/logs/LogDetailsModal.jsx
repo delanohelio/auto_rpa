@@ -13,7 +13,8 @@ import {
   Sparkles,
   Copy,
   Check,
-  FileText
+  FileText,
+  Eye
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -179,6 +180,87 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                 <AlertCircle size={16} /> Erro de Execução (Halter)
               </div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{log.error}</div>
+            </div>
+          )}
+
+          {/* Live Browser Stream Player (Feature 0) */}
+          {log.status === 'running' && (
+            <div
+              className="card mb-16"
+              style={{
+                border: '1px solid rgba(59, 130, 246, 0.4)',
+                padding: '16px',
+                background: 'rgba(15, 23, 42, 0.65)',
+                borderRadius: 'var(--radius-lg)'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span className="active-pulse-dot" />
+                  <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: 'var(--text-light)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Eye size={16} color="var(--color-primary)" /> Acompanhamento do Navegador em Tempo Real
+                  </h4>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    className="badge"
+                    style={{
+                      fontSize: '11px',
+                      background: log.headless === false ? 'rgba(168, 85, 247, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                      color: log.headless === false ? '#d8b4fe' : '#60a5fa',
+                      border: log.headless === false ? '1px solid rgba(168, 85, 247, 0.3)' : '1px solid rgba(59, 130, 246, 0.3)'
+                    }}
+                  >
+                    {log.headless === false ? 'Modo Headed (Janela Aberta)' : 'Modo Headless (Screencast CDP)'}
+                  </span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                    Transmissão ativa MJPEG
+                  </span>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  width: '100%',
+                  borderRadius: 'var(--radius-md)',
+                  overflow: 'hidden',
+                  background: '#090d16',
+                  border: '1px solid var(--border-color)',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  minHeight: '280px',
+                  boxShadow: 'inset 0 2px 8px rgba(0, 0, 0, 0.6)'
+                }}
+              >
+                <img
+                  src={`/api/runs/${log.id}/stream${localStorage.getItem('systemPassword') ? `?token=${encodeURIComponent(localStorage.getItem('systemPassword'))}` : ''}`}
+                  alt="Transmissão ao vivo do navegador"
+                  style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block' }}
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                    if (e.target.nextElementSibling) {
+                      e.target.nextElementSibling.style.display = 'flex';
+                    }
+                  }}
+                />
+                <div
+                  style={{
+                    display: 'none',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '30px',
+                    color: 'var(--text-muted)',
+                    fontSize: '12px',
+                    gap: '8px'
+                  }}
+                >
+                  <Eye size={24} color="var(--text-dark)" />
+                  <span>Transmissão aguardando carregamento da primeira tela...</span>
+                </div>
+              </div>
             </div>
           )}
 

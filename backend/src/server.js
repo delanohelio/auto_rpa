@@ -6,7 +6,8 @@ import dotenv from 'dotenv';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { db } from './db/db.js';
-import { runTask, activeControlSessions, activePromptSessions } from './runner/engine.js';
+import { runTask, activeControlSessions, activePromptSessions, activeRunStreams } from './runner/engine.js';
+import { sandboxManager } from './runner/sandbox.js';
 import { initScheduler, startSchedule, stopSchedule, isValidCron, getNextRun } from './scheduler/cron.js';
 
 dotenv.config();
@@ -54,7 +55,7 @@ app.post('/api/auth/login', (req, res) => {
 // Middleware to protect API routes
 app.use((req, res, next) => {
   if (SYSTEM_PASSWORD && req.path.startsWith('/api/') && !req.path.startsWith('/api/auth/')) {
-    const authHeader = req.headers['x-system-password'];
+    const authHeader = req.headers['x-system-password'] || req.query.token || req.query.auth || req.query.password;
     if (authHeader !== SYSTEM_PASSWORD) {
       return res.status(401).json({ error: 'Acesso não autorizado. Autenticação pendente.' });
     }
@@ -241,16 +242,16 @@ app.post('/api/tasks/:id/run', async (req, res) => {
     const task = db.getTask(req.params.id);
     if (!task) return res.status(404).json({ error: 'Task not found' });
 
-    const { parameterOverrides = {}, runtimeVars = {}, skipVars = [] } = req.body;
-    console.log(`Manual execution requested for Task "${task.name}" with overrides:`, JSON.stringify(parameterOverrides), 'runtimeVars:', JSON.stringify(runtimeVars), 'skipVars:', JSON.stringify(skipVars));
+    const { parameterOverrides = {}, runtimeVars = {}, skipVars = [], headless, liveView = true } = req.body;
+    console.log(`Manual execution requested for Task "${task.name}" with overrides:`, JSON.stringify(parameterOverrides), 'headless:', headless, 'liveView:', liveView);
     
     const runId = crypto.randomUUID();
     // Execute asynchronously to avoid blocking the REST API request
-    runTask(task.id, parameterOverrides, runId, runtimeVars, skipVars).catch(err => {
+    runTask(task.id, parameterOverrides, runId, runtimeVars, skipVars, 'manual', null, { headless, liveView }).catch(err => {
       console.error(`Asynchronous run for task ${task.id} failed:`, err);
     });
 
-    res.json({ message: 'Execution started', taskId: task.id, runId });
+    res.json({ message: 'Execution started', taskId: task.id, runId, headless, liveView });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -356,7 +357,10 @@ app.get('/api/runs/active', (req, res) => {
         waitingForAgent: isAgentWaiting,
         waitingForPrompt: isPromptWaiting,
         promptTitle: promptSession?.promptTitle || null,
-        promptDescription: promptSession?.promptDescription || null
+        promptDescription: promptSession?.promptDescription || null,
+        hasLiveStream: activeRunStreams.has(l.id),
+        headless: l.headless !== undefined ? l.headless : true,
+        liveView: l.liveView !== undefined ? l.liveView : true
       };
     });
 
@@ -619,6 +623,107 @@ app.post('/api/interactive/submit', (req, res) => {
 
     console.log(`Interactive prompt submitted for run ${runId}. Resuming pipeline with values:`, values);
     res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- 7. PIPELINE REAL-TIME STREAMING API ---
+app.get('/api/runs/:runId/stream', (req, res) => {
+  const { runId } = req.params;
+  const stream = activeRunStreams.get(runId);
+  if (!stream) {
+    return res.status(404).send('Nenhum stream de tela ativo para esta execução.');
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'multipart/x-mixed-replace; boundary=--frame',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Connection': 'close',
+    'Expires': '0'
+  });
+
+  const sendFrame = (jpegBuffer) => {
+    try {
+      res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpegBuffer.length}\r\n\r\n`);
+      res.write(jpegBuffer);
+      res.write('\r\n');
+    } catch (_) {}
+  };
+
+  if (stream.lastFrame) {
+    sendFrame(stream.lastFrame);
+  }
+
+  stream.clients.add(sendFrame);
+
+  req.on('close', () => {
+    stream.clients.delete(sendFrame);
+  });
+});
+
+// --- 8. LIVE SANDBOX STUDIO API ---
+
+// POST /api/sandbox/init - Initialize or connect to live sandbox browser
+app.post('/api/sandbox/init', async (req, res) => {
+  try {
+    const { headless = true, antiDetection = true } = req.body;
+    const result = await sandboxManager.initSession({ headless, antiDetection });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/sandbox/stream - Live MJPEG video stream of the sandbox browser
+app.get('/api/sandbox/stream', (req, res) => {
+  try {
+    sandboxManager.addStreamClient(res);
+  } catch (error) {
+    res.status(500).send(error.message);
+  }
+});
+
+// POST /api/sandbox/execute-step - Execute a single step live on the sandbox page
+app.post('/api/sandbox/execute-step', async (req, res) => {
+  try {
+    const { step, parameters = {}, secrets = {} } = req.body;
+    if (!step || !step.type) {
+      return res.status(400).json({ error: 'Configuração da etapa (step) é obrigatória.' });
+    }
+    const result = await sandboxManager.executeStep(step, parameters, secrets);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/sandbox/reset - Reset the sandbox browser to clean slate (about:blank)
+app.post('/api/sandbox/reset', async (req, res) => {
+  try {
+    const result = await sandboxManager.resetSession();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/sandbox/state - Current state of the sandbox browser (URL, title, readiness)
+app.get('/api/sandbox/state', async (req, res) => {
+  try {
+    const state = await sandboxManager.getState();
+    res.json(state);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/sandbox/close - Close sandbox browser
+app.post('/api/sandbox/close', async (req, res) => {
+  try {
+    await sandboxManager.closeSession();
+    res.json({ success: true, message: 'Sandbox fechado com sucesso.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
