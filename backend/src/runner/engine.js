@@ -32,6 +32,9 @@ export const activePromptSessions = new Map();
 // Active real-time screencast streams for pipeline runs
 export const activeRunStreams = new Map();
 
+// Active Playwright page instances for pipeline runs (allows interaction forwarding)
+export const activeRunPages = new Map();
+
 
 /**
  * Replace secret and parameter references in text
@@ -263,6 +266,18 @@ export async function runTask(
   logRecord.status = 'running';
   db.addLog(logRecord); // Write log state so the UI picks it up immediately
 
+  // Pre-initialize real-time screencast stream so early client connections don't 404
+  let runStream = null;
+  if (isLiveView) {
+    runStream = {
+      clients: new Set(),
+      lastFrame: null,
+      cdp: null,
+      ready: false
+    };
+    activeRunStreams.set(runId, runStream);
+  }
+
   const settings = db.getSettings();
   const startHookUrl = settings.startHookUrl;
   const endHookUrl = settings.endHookUrl;
@@ -283,7 +298,6 @@ export async function runTask(
   let context = null;
   let page = null;
   let skipNextStep = false;
-  let runStream = null;
 
   try {
     console.log(`Starting execution of Task: "${task.name}" (${taskId}) - Headless: ${isHeadless}, LiveView: ${isLiveView}`);
@@ -352,16 +366,11 @@ export async function runTask(
     }
 
     page = await context.newPage();
+    activeRunPages.set(runId, page);
+    await page.goto('about:blank');
 
-    // Start live screencast stream if requested
-    if (isLiveView) {
-      runStream = {
-        clients: new Set(),
-        lastFrame: null,
-        cdp: null
-      };
-      activeRunStreams.set(runId, runStream);
-
+    // Attach CDP live screencast stream if requested (identical to Sandbox Studio)
+    if (isLiveView && runStream) {
       try {
         const cdp = await context.newCDPSession(page);
         runStream.cdp = cdp;
@@ -377,14 +386,23 @@ export async function runTask(
           try { await cdp.send('Page.screencastFrameAck', { sessionId }); } catch (_) {}
           const buffer = Buffer.from(data, 'base64');
           runStream.lastFrame = buffer;
+          runStream.ready = true;
           for (const sendFrame of runStream.clients) {
             try { sendFrame(buffer); } catch (_) {}
           }
         });
 
-        page.screenshot({ type: 'jpeg', quality: 75 }).then(buf => {
-          runStream.lastFrame = buf;
-        }).catch(() => {});
+        // Capture initial frame immediately (just like in Sandbox!)
+        try {
+          const initialBuf = await page.screenshot({ type: 'jpeg', quality: 75 });
+          runStream.lastFrame = initialBuf;
+          runStream.ready = true;
+          for (const sendFrame of runStream.clients) {
+            try { sendFrame(initialBuf); } catch (_) {}
+          }
+        } catch (initialErr) {
+          console.warn(`[Engine] Could not capture initial frame: ${initialErr.message}`);
+        }
       } catch (screencastErr) {
         console.warn(`[Engine] Could not start CDP screencast for run ${runId}:`, screencastErr.message);
       }
@@ -851,6 +869,7 @@ export async function runTask(
                   status: 'waiting_manual',
                   promptTitle: 'Interação Manual do Usuário',
                   promptDescription: instruction,
+                  page,
                   timeoutTimer: null,
                   resolvePromise: resolve,
                   rejectPromise: reject
@@ -915,7 +934,8 @@ export async function runTask(
     logRecord.endedAt = endedAt;
     logRecord.duration = Math.round((new Date(endedAt) - new Date(startedAt)) / 1000);
 
-    // Close CDP screencast stream if active
+    // Close CDP screencast stream and release active page if active
+    activeRunPages.delete(runId);
     if (activeRunStreams.has(runId)) {
       const stream = activeRunStreams.get(runId);
       if (stream.cdp) {

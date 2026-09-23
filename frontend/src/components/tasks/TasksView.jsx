@@ -86,9 +86,9 @@ export default function TasksView({ initialEditingId, onClearInitialEditingId, o
   const handleStartTaskRun = async (overrides, runtimeVars, skipVars, options) => {
     if (!runningTask) return;
     try {
-      await triggerTaskRun(runningTask.id, overrides, runtimeVars, skipVars, options);
+      const data = await triggerTaskRun(runningTask.id, overrides, runtimeVars, skipVars, options);
       setRunningTask(null);
-      onNavigateToLogs?.();
+      onNavigateToLogs?.(data?.runId);
     } catch (_) {}
   };
 

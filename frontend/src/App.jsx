@@ -161,7 +161,10 @@ function AppContent() {
             url.searchParams.delete('id');
             window.history.replaceState({ tab: 'tasks', id: null }, '', url.toString());
           }}
-          onNavigateToLogs={() => handleNavigate('logs')}
+          onNavigateToLogs={(runId) => {
+            if (runId) setActiveId(runId);
+            handleNavigate('logs');
+          }}
           onTestInSandbox={(task) => {
             setSandboxInitialData({ type: 'pipeline', data: task });
             handleNavigate('sandbox');
@@ -171,7 +174,10 @@ function AppContent() {
 
       {activeTab === 'scheduler' && (
         <SchedulerView
-          onNavigateToLogs={() => handleNavigate('logs')}
+          onNavigateToLogs={(runId) => {
+            if (runId) setActiveId(runId);
+            handleNavigate('logs');
+          }}
         />
       )}
 
@@ -205,8 +211,9 @@ function AppContent() {
         <TaskRunModal
           task={quickRunTask}
           onStartRun={async (overrides, runtimeVars, skipVars, options) => {
-            await triggerTaskRun(quickRunTask.id, overrides, runtimeVars, skipVars, options);
+            const data = await triggerTaskRun(quickRunTask.id, overrides, runtimeVars, skipVars, options);
             setQuickRunTask(null);
+            if (data?.runId) setActiveId(data.runId);
             handleNavigate('logs');
           }}
           onClose={() => setQuickRunTask(null)}

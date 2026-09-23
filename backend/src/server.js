@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { db } from './db/db.js';
-import { runTask, activeControlSessions, activePromptSessions, activeRunStreams } from './runner/engine.js';
+import { runTask, activeControlSessions, activePromptSessions, activeRunStreams, activeRunPages } from './runner/engine.js';
 import { sandboxManager } from './runner/sandbox.js';
 import { initScheduler, startSchedule, stopSchedule, isValidCron, getNextRun } from './scheduler/cron.js';
 
@@ -313,7 +313,7 @@ app.post('/api/schedules/:id/run', async (req, res) => {
     const task = db.getTask(schedule.taskId);
     if (!task) return res.status(404).json({ error: `Pipeline vinculada (${schedule.taskId}) não encontrada` });
 
-    const { parameterOverrides = {}, runtimeVars = {}, skipVars = [] } = req.body;
+    const { parameterOverrides = {}, runtimeVars = {}, skipVars = [], headless, liveView = true } = req.body;
     console.log(`Manual execution requested for Schedule "${schedule.id}" (Task "${task.name}")`);
 
     const runId = crypto.randomUUID();
@@ -326,11 +326,11 @@ app.post('/api/schedules/:id/run', async (req, res) => {
     });
 
     // Execute asynchronously with trigger: 'schedule'
-    runTask(task.id, parameterOverrides, runId, runtimeVars, skipVars, 'schedule', schedule.id).catch(err => {
+    runTask(task.id, parameterOverrides, runId, runtimeVars, skipVars, 'schedule', schedule.id, { headless, liveView }).catch(err => {
       console.error(`Scheduled execution for task ${task.id} failed:`, err);
     });
 
-    res.json({ message: 'Execução do agendamento iniciada', taskId: task.id, scheduleId: schedule.id, runId });
+    res.json({ message: 'Execução do agendamento iniciada', taskId: task.id, scheduleId: schedule.id, runId, headless, liveView });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -652,10 +652,20 @@ app.post('/api/interactive/continue', (req, res) => {
   }
 });
 
-// --- 7. PIPELINE REAL-TIME STREAMING API ---
-app.get('/api/runs/:runId/stream', (req, res) => {
+// --- 7. PIPELINE REAL-TIME STREAMING & INTERACTION API ---
+app.get('/api/runs/:runId/stream', async (req, res) => {
   const { runId } = req.params;
-  const stream = activeRunStreams.get(runId);
+
+  // Allow up to 10 seconds for the run stream to register during Chromium startup
+  let stream = activeRunStreams.get(runId);
+  if (!stream) {
+    const startWait = Date.now();
+    while (!stream && Date.now() - startWait < 10000) {
+      await new Promise(r => setTimeout(r, 200));
+      stream = activeRunStreams.get(runId);
+    }
+  }
+
   if (!stream) {
     return res.status(404).send('Nenhum stream de tela ativo para esta execução.');
   }
@@ -685,6 +695,38 @@ app.get('/api/runs/:runId/stream', (req, res) => {
   req.on('close', () => {
     stream.clients.delete(sendFrame);
   });
+});
+
+// POST /api/runs/:runId/interact - Dispatch user clicks/keyboard during manual interaction
+app.post('/api/runs/:runId/interact', async (req, res) => {
+  try {
+    const { runId } = req.params;
+    const { type, x, y, text, key, deltaY } = req.body;
+    const page = activeRunPages.get(runId);
+    if (!page || page.isClosed()) {
+      return res.status(404).json({ error: 'Navegador não disponível para interação nesta execução.' });
+    }
+
+    if (type === 'click') {
+      if (typeof x === 'number' && typeof y === 'number') {
+        await page.mouse.click(x, y);
+      }
+    } else if (type === 'type') {
+      if (text) {
+        await page.keyboard.type(text);
+      }
+    } else if (type === 'key') {
+      if (key) {
+        await page.keyboard.press(key);
+      }
+    } else if (type === 'scroll') {
+      await page.mouse.wheel(0, deltaY || 100);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- 8. LIVE SANDBOX STUDIO API ---
