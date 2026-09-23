@@ -3,6 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getPlaywrightSelector, resolveText } from './engine.js';
+import { db } from '../db/db.js';
+import { decrypt } from '../utils/crypto.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -209,6 +211,27 @@ class SandboxManager {
       await this.initSession({ headless: this.headless });
     }
 
+    // Resolve secrets: use test secrets provided by user in Sandbox;
+    // if a secret is blank or masked and step belongs to a block, fallback to DB vault
+    const resolvedSecrets = { ...secrets };
+    const targetBlockId = step.sourceBlockId || step.blockId;
+    if (targetBlockId) {
+      try {
+        const storedBlock = db.getBlock(targetBlockId, false);
+        if (storedBlock && storedBlock.secrets) {
+          for (const [key, encVal] of Object.entries(storedBlock.secrets)) {
+            if (!resolvedSecrets[key] || resolvedSecrets[key] === '********') {
+              try {
+                resolvedSecrets[key] = decrypt(encVal);
+              } catch (_) {}
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`[Sandbox] Falha ao carregar secrets do bloco ${targetBlockId}:`, err.message);
+      }
+    }
+
     const startTime = Date.now();
     const resultLog = {
       type: step.type,
@@ -225,7 +248,7 @@ class SandboxManager {
       switch (step.type) {
         case 'navigate': {
           const rawUrl = step.url || '';
-          const url = resolveText(rawUrl, secrets, parameters);
+          const url = resolveText(rawUrl, resolvedSecrets, parameters);
           if (!url) throw new Error('A ação Navegar requer uma URL válida.');
           console.log(`[Sandbox] Navigating to: ${url}`);
           await this.page.goto(url, { waitUntil: 'load', timeout: 30000 });
@@ -234,7 +257,7 @@ class SandboxManager {
         }
 
         case 'click': {
-          const selector = resolveText(step.selector, secrets, parameters);
+          const selector = resolveText(step.selector, resolvedSecrets, parameters);
           if (!selector) throw new Error('A ação Clicar requer um seletor.');
           const pwSelector = getPlaywrightSelector(selector, step.selector_type);
           console.log(`[Sandbox] Clicking: ${pwSelector}`);
@@ -250,16 +273,29 @@ class SandboxManager {
         }
 
         case 'type': {
-          const selector = resolveText(step.selector, secrets, parameters);
+          const selector = resolveText(step.selector, resolvedSecrets, parameters);
           if (!selector) throw new Error('A ação Digitar requer um seletor.');
           const pwSelector = getPlaywrightSelector(selector, step.selector_type);
           const rawText = step.text || '';
-          const textToType = resolveText(rawText, secrets, parameters);
+          const textToType = resolveText(rawText, resolvedSecrets, parameters);
           console.log(`[Sandbox] Typing in ${pwSelector}: ${rawText.includes('{{secret') ? '********' : textToType}`);
           const locator = this.page.locator(pwSelector).first();
           await locator.waitFor({ state: 'visible', timeout: 15000 });
           await locator.fill(textToType, { timeout: 10000 });
           resultLog.data = { message: `Texto digitado em ${pwSelector}` };
+          break;
+        }
+
+        case 'select': {
+          const selector = resolveText(step.selector, resolvedSecrets, parameters);
+          if (!selector) throw new Error('A ação Selecionar requer um seletor.');
+          const pwSelector = getPlaywrightSelector(selector, step.selector_type);
+          const val = resolveText(step.value || '', resolvedSecrets, parameters);
+          console.log(`[Sandbox] Selecting in ${pwSelector}: ${val}`);
+          const locator = this.page.locator(pwSelector).first();
+          await locator.waitFor({ state: 'visible', timeout: 15000 });
+          await locator.selectOption(val, { timeout: 10000 });
+          resultLog.data = { message: `Opção selecionada: ${val}` };
           break;
         }
 
@@ -273,7 +309,7 @@ class SandboxManager {
           } else if (condition === 'networkidle') {
             await this.page.waitForLoadState('networkidle', { timeout });
           } else if (condition === 'visible') {
-            const selector = resolveText(step.selector, secrets, parameters);
+            const selector = resolveText(step.selector, resolvedSecrets, parameters);
             if (!selector) throw new Error('A espera por elemento visível requer um seletor.');
             const pwSelector = getPlaywrightSelector(selector, step.selector_type);
             await this.page.locator(pwSelector).first().waitFor({ state: 'visible', timeout });
@@ -283,7 +319,7 @@ class SandboxManager {
         }
 
         case 'keypress': {
-          const key = resolveText(step.key || 'Enter', secrets, parameters);
+          const key = resolveText(step.key || 'Enter', resolvedSecrets, parameters);
           console.log(`[Sandbox] Keypress: ${key}`);
           await this.page.keyboard.press(key);
           resultLog.data = { message: `Tecla pressionada: ${key}` };
@@ -298,7 +334,7 @@ class SandboxManager {
         }
 
         case 'list_elements': {
-          const query = resolveText(step.query_selector, secrets, parameters);
+          const query = resolveText(step.query_selector, resolvedSecrets, parameters);
           if (!query) throw new Error('A ação Listar Elementos requer um query_selector.');
           const pwSelector = getPlaywrightSelector(query, step.selector_type || 'css');
           console.log(`[Sandbox] Listing elements: ${pwSelector}`);
@@ -317,7 +353,7 @@ class SandboxManager {
         }
 
         case 'conditional_if': {
-          const selector = resolveText(step.selector_exists, secrets, parameters);
+          const selector = resolveText(step.selector_exists, resolvedSecrets, parameters);
           if (!selector) throw new Error('A condição requer um seletor.');
           const pwSelector = getPlaywrightSelector(selector, step.selector_type);
           const exists = (await this.page.locator(pwSelector).count()) > 0;
@@ -326,7 +362,7 @@ class SandboxManager {
         }
 
         case 'eval': {
-          const script = resolveText(step.script, secrets, parameters);
+          const script = resolveText(step.script, resolvedSecrets, parameters);
           if (!script) throw new Error("O script da etapa 'eval' não foi fornecido.");
           console.log(`[Sandbox] Evaluating script: ${script.substring(0, 60)}...`);
           const output = await this.page.evaluate(script);
@@ -345,7 +381,7 @@ class SandboxManager {
           // If output_file is configured, also save to disk
           const rawOutputFile = (step.output_file || '').trim();
           if (rawOutputFile) {
-            const resolvedFilename = resolveText(rawOutputFile, secrets, parameters).trim();
+            const resolvedFilename = resolveText(rawOutputFile, resolvedSecrets, parameters).trim();
             if (resolvedFilename) {
               const safeFilename = path.basename(resolvedFilename);
               const uniqueFilename = `sandbox_${safeFilename}`;

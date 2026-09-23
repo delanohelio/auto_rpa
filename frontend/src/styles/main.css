@@ -41,23 +41,76 @@ h1, h2, h3, h4, h5, h6 {
   display: grid;
   grid-template-columns: 260px 1fr;
   min-height: 100vh;
+  transition: grid-template-columns 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.app-container.sidebar-collapsed {
+  grid-template-columns: 74px 1fr;
 }
 
 /* Sidebar */
 .sidebar {
   background-color: var(--bg-sidebar);
   border-right: 1px solid var(--border-color);
-  padding: 24px;
+  padding: 24px 18px;
   display: flex;
   flex-direction: column;
+  transition: padding 0.22s ease;
+  overflow: hidden;
+}
+
+.sidebar.collapsed {
+  padding: 20px 10px;
+}
+
+.sidebar-collapse-btn,
+.sidebar-header-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  transition: var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.sidebar-collapse-btn:hover,
+.sidebar-header-toggle:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-light);
+  border-color: var(--border-color);
+}
+
+.sidebar-header-toggle {
+  margin-right: 8px;
 }
 
 .logo-section {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 36px;
-  padding: 6px;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 32px;
+  padding: 4px;
+}
+
+.sidebar.collapsed .logo-section {
+  justify-content: center;
+  padding: 0;
+  margin-bottom: 24px;
+}
+
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 12px 0;
+}
+
+.sidebar.collapsed .sidebar-footer {
+  padding-top: 12px;
 }
 
 .logo-section h1 {
@@ -1462,5 +1515,39 @@ select.form-control {
 
 .console-log-row.log-error .log-msg {
   color: #f87171;
+}
+
+.btn-subtle-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  transition: var(--transition-fast);
+}
+
+.btn-subtle-tab:hover {
+  color: var(--text-light);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.btn-subtle-tab.active {
+  color: var(--color-primary);
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.step-source-block {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(168, 85, 247, 0.12);
+  color: #d8b4fe;
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 

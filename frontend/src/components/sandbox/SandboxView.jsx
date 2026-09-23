@@ -19,6 +19,7 @@ import {
   Clock,
   ExternalLink,
   Eye,
+  EyeOff,
   Sliders,
   ChevronRight,
   ChevronDown,
@@ -29,7 +30,12 @@ import {
   Monitor,
   Maximize2,
   Minimize2,
-  FileText
+  FileText,
+  Boxes,
+  Workflow,
+  Lock,
+  FolderInput,
+  Key
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -37,35 +43,26 @@ import { useData } from '../../context/DataContext';
 import CodeEditor from '../code/CodeEditor';
 import JsonViewer from '../code/JsonViewer';
 
-export default function SandboxView({ initialBlock = null, onSavedBlock = null }) {
+export default function SandboxView({ initialData = null, onSavedBlock = null }) {
   const { apiFetch } = useAuth();
   const toast = useToast();
-  const { saveBlock } = useData();
+  const { blocks, tasks, saveBlock } = useData();
 
-  // Block Model State
-  const [blockName, setBlockName] = useState(initialBlock?.name || 'Novo Bloco de Teste');
-  const [blockDesc, setBlockDesc] = useState(initialBlock?.description || 'Testado e validado no Sandbox Studio');
-  const [steps, setSteps] = useState(() => {
-    if (initialBlock?.steps && initialBlock.steps.length > 0) {
-      return JSON.parse(JSON.stringify(initialBlock.steps));
-    }
-    return [
-      { type: 'navigate', url: 'https://example.com' },
-      { type: 'eval', script: '(() => {\n  return { title: document.title, url: window.location.href };\n})()' }
-    ];
-  });
+  // Block / Pipeline Model State
+  const [sourceType, setSourceType] = useState('custom'); // 'custom' | 'block' | 'pipeline'
+  const [blockName, setBlockName] = useState('Novo Bloco de Teste');
+  const [blockDesc, setBlockDesc] = useState('Testado e validado no Sandbox Studio');
+  const [steps, setSteps] = useState([
+    { type: 'navigate', url: 'https://example.com' },
+    { type: 'eval', script: '(() => {\n  return { title: document.title, url: window.location.href };\n})()' }
+  ]);
 
-  // Test Parameter Values for resolving {{param}} placeholders in Sandbox
-  const [testParams, setTestParams] = useState(() => {
-    const p = {};
-    if (initialBlock?.parameters) {
-      initialBlock.parameters.forEach(param => {
-        p[param.name] = param.defaultValue || '';
-      });
-    }
-    return p;
-  });
-  const [showParamsDrawer, setShowParamsDrawer] = useState(false);
+  // Test Variables & Secrets State
+  const [testParams, setTestParams] = useState({});
+  const [testSecrets, setTestSecrets] = useState({});
+  const [revealedSecrets, setRevealedSecrets] = useState({});
+  const [showVariablesDrawer, setShowVariablesDrawer] = useState(false);
+  const [activeVariablesTab, setActiveVariablesTab] = useState('params'); // 'params' | 'secrets'
 
   // Browser & Session State
   const [isReady, setIsReady] = useState(false);
@@ -83,9 +80,122 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
   const [consoleLogs, setConsoleLogs] = useState([]);
   const [isFullscreenStream, setIsFullscreenStream] = useState(false);
 
-  // Save Modal
+  // Modals
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importModalTab, setImportModalTab] = useState('pipelines'); // 'pipelines' | 'blocks'
+
+  // Load from Pipeline or Block source
+  const loadSource = useCallback((source) => {
+    if (!source) return;
+
+    if (source.type === 'pipeline') {
+      const pipeline = source.data;
+      setSourceType('pipeline');
+      setBlockName(`Pipeline: ${pipeline.name}`);
+      setBlockDesc(pipeline.description || 'Sequência importada da pipeline para depuração');
+
+      const extractedSteps = [];
+      const extractedParams = {};
+      const extractedSecrets = {};
+
+      const instances = pipeline.blocks || [];
+      instances.forEach((instance, blockIdx) => {
+        const blkId = instance.blockId || instance;
+        const blk = blocks.find(b => b.id === blkId);
+        if (!blk) return;
+
+        // Collect parameters
+        (blk.parameters || []).forEach(p => {
+          extractedParams[p.name] = instance.parameterValues?.[p.name] ?? p.defaultValue ?? '';
+        });
+
+        // Collect secrets
+        Object.keys(blk.secrets || {}).forEach(sKey => {
+          extractedSecrets[sKey] = '';
+        });
+
+        // Collect steps with source tracking
+        (blk.steps || []).forEach((st, sIdx) => {
+          extractedSteps.push({
+            ...JSON.parse(JSON.stringify(st)),
+            sourceBlockName: blk.name,
+            sourceBlockId: blk.id,
+            sourceBlockIndex: blockIdx + 1,
+            sourceStepIndex: sIdx + 1
+          });
+
+          // Also collect interactive prompt variables
+          if (st.type === 'user_prompt' && Array.isArray(st.vars)) {
+            st.vars.forEach(v => {
+              if (v.name && extractedParams[v.name] === undefined) {
+                extractedParams[v.name] = v.defaultValue || '';
+              }
+            });
+          }
+        });
+      });
+
+      setSteps(extractedSteps.length > 0 ? extractedSteps : [
+        { type: 'navigate', url: 'https://example.com' }
+      ]);
+      setTestParams(extractedParams);
+      setTestSecrets(extractedSecrets);
+      setStepResults({});
+      addConsoleLog('info', `Pipeline "${pipeline.name}" importada com ${extractedSteps.length} ações em sequência.`);
+      toast.success('Pipeline Carregada', `${extractedSteps.length} ações sequenciadas para teste.`);
+    } else if (source.type === 'block') {
+      const block = source.data;
+      setSourceType('block');
+      setBlockName(block.name || 'Bloco Importado');
+      setBlockDesc(block.description || 'Importado para teste no Sandbox');
+
+      const extractedSteps = (block.steps || []).map((st, idx) => ({
+        ...JSON.parse(JSON.stringify(st)),
+        sourceBlockName: block.name,
+        sourceBlockId: block.id,
+        sourceStepIndex: idx + 1
+      }));
+
+      const extractedParams = {};
+      (block.parameters || []).forEach(p => {
+        extractedParams[p.name] = p.defaultValue || '';
+      });
+
+      const extractedSecrets = {};
+      Object.keys(block.secrets || {}).forEach(sKey => {
+        extractedSecrets[sKey] = '';
+      });
+
+      // Interactive prompt vars
+      (block.steps || []).forEach(st => {
+        if (st.type === 'user_prompt' && Array.isArray(st.vars)) {
+          st.vars.forEach(v => {
+            if (v.name && extractedParams[v.name] === undefined) {
+              extractedParams[v.name] = v.defaultValue || '';
+            }
+          });
+        }
+      });
+
+      setSteps(extractedSteps.length > 0 ? extractedSteps : [
+        { type: 'navigate', url: 'https://example.com' }
+      ]);
+      setTestParams(extractedParams);
+      setTestSecrets(extractedSecrets);
+      setStepResults({});
+      addConsoleLog('info', `Bloco "${block.name}" importado com ${extractedSteps.length} ações.`);
+      toast.success('Bloco Carregado', `Bloco "${block.name}" pronto para teste.`);
+    }
+  }, [blocks, toast]);
+
+  // Load initialData when passed
+  useEffect(() => {
+    if (initialData) {
+      loadSource(initialData);
+    }
+  }, [initialData, loadSource]);
 
   // Initialize or connect to sandbox session
   const initSession = useCallback(async (desiredHeadless = headless) => {
@@ -126,7 +236,6 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
             return;
           }
         }
-        // If not ready, initialize
         await initSession(true);
       } catch (_) {
         await initSession(true);
@@ -144,7 +253,7 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
         text,
         details
       },
-      ...prev.slice(0, 49) // Keep last 50 logs
+      ...prev.slice(0, 49)
     ]);
   };
 
@@ -251,13 +360,16 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
   const handleExecuteStep = async (step, index) => {
     setExecutingStepIndex(index);
     try {
-      addConsoleLog('info', `Executando Ação #${index + 1}: ${step.type}...`);
+      const stepLabel = step.sourceBlockName ? `[${step.sourceBlockName}] ${step.type}` : step.type;
+      addConsoleLog('info', `Executando Ação #${typeof index === 'number' ? index + 1 : 'Direta'}: ${stepLabel}...`);
+
       const res = await apiFetch('/api/sandbox/execute-step', {
         method: 'POST',
         body: JSON.stringify({
           step,
+          parameters: testParams,
           parameterOverrides: testParams,
-          secrets: {}
+          secrets: testSecrets
         })
       });
 
@@ -266,14 +378,16 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
         throw new Error(result.error || 'Falha ao executar ação');
       }
 
-      setStepResults(prev => ({ ...prev, [index]: result }));
+      if (typeof index === 'number') {
+        setStepResults(prev => ({ ...prev, [index]: result }));
+      }
       if (result.currentUrl) setCurrentUrl(result.currentUrl);
       if (result.title) setPageTitle(result.title);
 
       if (result.success) {
-        addConsoleLog('success', `Ação #${index + 1} (${step.type}) concluída em ${result.duration}ms`, result.data);
+        addConsoleLog('success', `Ação #${typeof index === 'number' ? index + 1 : 'Direta'} (${step.type}) concluída em ${result.duration}ms`, result.data);
       } else {
-        addConsoleLog('error', `Ação #${index + 1} (${step.type}) falhou: ${result.error}`);
+        addConsoleLog('error', `Ação #${typeof index === 'number' ? index + 1 : 'Direta'} (${step.type}) falhou: ${result.error}`);
       }
 
       return result;
@@ -284,15 +398,17 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
         error: err.message,
         duration: 0
       };
-      setStepResults(prev => ({ ...prev, [index]: errResult }));
-      addConsoleLog('error', `Ação #${index + 1} falhou com exceção: ${err.message}`);
+      if (typeof index === 'number') {
+        setStepResults(prev => ({ ...prev, [index]: errResult }));
+      }
+      addConsoleLog('error', `Ação falhou com exceção: ${err.message}`);
       return errResult;
     } finally {
       setExecutingStepIndex(null);
     }
   };
 
-  // Execute all steps in sequential order
+  // Execute all steps sequentially
   const handleExecuteAll = async () => {
     if (steps.length === 0) return;
     setIsRunningAll(true);
@@ -301,7 +417,8 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
     for (let i = 0; i < steps.length; i++) {
       const result = await handleExecuteStep(steps[i], i);
       if (!result.success) {
-        toast.error('Execução Interrompida', `Ação #${i + 1} (${steps[i].type}) falhou: ${result.error}`);
+        const stepContext = steps[i].sourceBlockName ? ` do bloco "${steps[i].sourceBlockName}"` : '';
+        toast.error('Execução Interrompida', `Ação #${i + 1} (${steps[i].type})${stepContext} falhou: ${result.error}`);
         break;
       }
     }
@@ -332,13 +449,35 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
 
     setIsSaving(true);
     try {
+      // Clean steps from internal sandbox tracking properties
+      const cleanedSteps = steps.map(st => {
+        const copy = { ...st };
+        delete copy.sourceBlockName;
+        delete copy.sourceBlockId;
+        delete copy.sourceBlockIndex;
+        delete copy.sourceStepIndex;
+        return copy;
+      });
+
+      // Construct parameters definition
+      const savedParams = Object.keys(testParams).map(k => ({
+        name: k,
+        defaultValue: testParams[k],
+        description: 'Parâmetro validado no Sandbox'
+      }));
+
+      // Construct secrets definition
+      const savedSecrets = {};
+      Object.keys(testSecrets).forEach(k => {
+        savedSecrets[k] = testSecrets[k] || '********';
+      });
+
       const blockPayload = {
-        ...(initialBlock?.id ? { id: initialBlock.id } : {}),
         name: blockName.trim(),
         description: blockDesc.trim(),
-        steps,
-        parameters: initialBlock?.parameters || [],
-        secrets: initialBlock?.secrets || {}
+        steps: cleanedSteps,
+        parameters: savedParams,
+        secrets: savedSecrets
       };
 
       const saved = await saveBlock(blockPayload);
@@ -349,6 +488,10 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const toggleRevealSecret = (key) => {
+    setRevealedSecrets(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
   // Stream URL with auth token if required
@@ -364,19 +507,31 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
             <FlaskConical size={18} color="#60a5fa" />
           </div>
           <div>
-            <h2 style={{ fontSize: '16px', margin: 0, fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <h2 style={{ fontSize: '15px', margin: 0, fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
               Live Sandbox Studio
               <span className="badge" style={{ fontSize: '10px', background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
-                Interativo
+                {sourceType === 'pipeline' ? 'Pipeline Ativa' : sourceType === 'block' ? 'Bloco Ativo' : 'Livre'}
               </span>
             </h2>
             <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-              Teste ações em tempo real contra o navegador Chromium antes de consolidar seu bloco
+              Teste e depure ações em tempo real contra o Chromium com decifragem do cofre
             </span>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {/* Quick Import Modal Button */}
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setShowImportModal(true)}
+            title="Importar uma pipeline ou bloco existente para testar aqui"
+            style={{ fontSize: '12px', gap: '6px' }}
+          >
+            <FolderInput size={14} color="#60a5fa" />
+            Importar...
+          </button>
+
           {/* Headless Toggle */}
           <button
             type="button"
@@ -386,19 +541,24 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
             style={{ fontSize: '12px', gap: '6px' }}
           >
             <Monitor size={14} color={headless ? 'var(--text-muted)' : '#c084fc'} />
-            {headless ? 'Headless' : 'Headed (Com Janela)'}
+            {headless ? 'Headless' : 'Headed (Visual)'}
           </button>
 
-          {/* Parameters / Variables Drawer Toggle */}
+          {/* Variables & Secrets Drawer Toggle */}
           <button
             type="button"
-            className={`btn btn-secondary btn-sm ${showParamsDrawer ? 'active' : ''}`}
-            onClick={() => setShowParamsDrawer(prev => !prev)}
-            title="Configurar variáveis de teste para interpolação {{param}}"
-            style={{ fontSize: '12px', gap: '6px' }}
+            className={`btn btn-secondary btn-sm ${showVariablesDrawer ? 'active' : ''}`}
+            onClick={() => setShowVariablesDrawer(prev => !prev)}
+            title="Editar variáveis e secrets para testar ações com interpolação"
+            style={{
+              fontSize: '12px',
+              gap: '6px',
+              background: showVariablesDrawer ? 'rgba(59, 130, 246, 0.2)' : undefined,
+              borderColor: showVariablesDrawer ? 'var(--color-primary)' : undefined
+            }}
           >
             <Sliders size={14} />
-            Variáveis de Teste
+            Variáveis & Secrets ({Object.keys(testParams).length + Object.keys(testSecrets).length})
           </button>
 
           {/* Run All Button */}
@@ -441,15 +601,27 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
         {/* LEFT COLUMN: ACTION SEQUENCING & STEP CONFIGURATION            */}
         {/* ============================================================== */}
         <div className="sandbox-steps-column">
-          {/* Block Metadata Bar */}
+          {/* Block / Pipeline Metadata Bar */}
           <div className="sandbox-block-header">
-            <input
-              type="text"
-              className="sandbox-title-input"
-              value={blockName}
-              onChange={e => setBlockName(e.target.value)}
-              placeholder="Nome do Bloco de Ações..."
-            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {sourceType === 'pipeline' && (
+                <span className="badge" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  <Workflow size={11} /> Pipeline
+                </span>
+              )}
+              {sourceType === 'block' && (
+                <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  <Boxes size={11} /> Bloco
+                </span>
+              )}
+              <input
+                type="text"
+                className="sandbox-title-input"
+                value={blockName}
+                onChange={e => setBlockName(e.target.value)}
+                placeholder="Nome do Bloco ou Pipeline..."
+              />
+            </div>
             <input
               type="text"
               className="sandbox-desc-input"
@@ -459,47 +631,179 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
             />
           </div>
 
-          {/* Variables Drawer (if toggled) */}
-          {showParamsDrawer && (
+          {/* Variables & Secrets Drawer (Requirement 3 & 4) */}
+          {showVariablesDrawer && (
             <div className="sandbox-params-drawer">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-secondary)' }}>
-                  Variáveis de Teste (Interpolação)
-                </span>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                  Use {`{{chave}}`} nas ações abaixo
-                </span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '8px', marginBottom: '10px' }}>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    type="button"
+                    className={`btn-subtle-tab ${activeVariablesTab === 'params' ? 'active' : ''}`}
+                    onClick={() => setActiveVariablesTab('params')}
+                    style={{ fontSize: '12px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Sliders size={13} />
+                    Variáveis ({Object.keys(testParams).length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn-subtle-tab ${activeVariablesTab === 'secrets' ? 'active' : ''}`}
+                    onClick={() => setActiveVariablesTab('secrets')}
+                    style={{ fontSize: '12px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Lock size={13} />
+                    Secrets ({Object.keys(testSecrets).length})
+                  </button>
+                </div>
+
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  Interpolação ativa: <code style={{ color: '#93c5fd' }}>{'{{nome}}'}</code>
+                </div>
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {Object.entries(testParams).map(([k, val]) => (
-                  <div key={k} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(0,0,0,0.3)', padding: '4px 8px', borderRadius: '4px' }}>
-                    <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: '#93c5fd' }}>{k}:</span>
-                    <input
-                      type="text"
-                      value={val}
-                      onChange={e => {
-                        const nextVal = e.target.value;
-                        setTestParams(prev => ({ ...prev, [k]: nextVal }));
+
+              {/* Tab 1: Parameters / Variables */}
+              {activeVariablesTab === 'params' && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      Edite os valores abaixo para testar diferentes entradas nas ações:
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: '11px', padding: '3px 8px' }}
+                      onClick={() => {
+                        const name = prompt('Nome da variável (ex: usuario, url_base, termo_busca):');
+                        if (name && name.trim()) {
+                          setTestParams(prev => ({ ...prev, [name.trim()]: '' }));
+                        }
                       }}
-                      style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '11px', width: '100px' }}
-                    />
+                    >
+                      <Plus size={11} /> Nova Variável
+                    </button>
                   </div>
-                ))}
-                {/* Add new param inline */}
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  style={{ fontSize: '10px', padding: '2px 8px' }}
-                  onClick={() => {
-                    const name = prompt('Nome da variável (ex: usuario, url_base):');
-                    if (name && name.trim()) {
-                      setTestParams(prev => ({ ...prev, [name.trim()]: '' }));
-                    }
-                  }}
-                >
-                  + Nova Variável
-                </button>
-              </div>
+
+                  {Object.keys(testParams).length === 0 ? (
+                    <div style={{ fontStyle: 'italic', fontSize: '11px', color: 'var(--text-dark)', padding: '6px 0' }}>
+                      Nenhuma variável cadastrada. Clique em "+ Nova Variável" para adicionar.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '8px', maxHeight: '140px', overflowY: 'auto' }}>
+                      {Object.entries(testParams).map(([k, val]) => (
+                        <div key={k} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(0,0,0,0.3)', padding: '6px 8px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                          <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: '#93c5fd', flexShrink: 0 }}>
+                            {k}:
+                          </span>
+                          <input
+                            type="text"
+                            value={val}
+                            onChange={e => {
+                              const nextVal = e.target.value;
+                              setTestParams(prev => ({ ...prev, [k]: nextVal }));
+                            }}
+                            placeholder="Valor de teste..."
+                            style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '11px', width: '100%', outline: 'none' }}
+                          />
+                          <button
+                            type="button"
+                            className="btn-icon-subtle btn-danger-hover"
+                            style={{ padding: '2px', flexShrink: 0 }}
+                            onClick={() => {
+                              setTestParams(prev => {
+                                const copy = { ...prev };
+                                delete copy[k];
+                                return copy;
+                              });
+                            }}
+                            title={`Remover variável ${k}`}
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab 2: Secrets */}
+              {activeVariablesTab === 'secrets' && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      Valores vazios usam automaticamente o cofre criptografado do banco de dados:
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: '11px', padding: '3px 8px' }}
+                      onClick={() => {
+                        const name = prompt('Nome do Secret (ex: senha_banco, token_api):');
+                        if (name && name.trim()) {
+                          setTestSecrets(prev => ({ ...prev, [name.trim()]: '' }));
+                        }
+                      }}
+                    >
+                      <Plus size={11} /> Novo Secret
+                    </button>
+                  </div>
+
+                  {Object.keys(testSecrets).length === 0 ? (
+                    <div style={{ fontStyle: 'italic', fontSize: '11px', color: 'var(--text-dark)', padding: '6px 0' }}>
+                      Nenhum secret cadastrado nas ações. Clique em "+ Novo Secret" para adicionar uma chave confidencial.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '8px', maxHeight: '140px', overflowY: 'auto' }}>
+                      {Object.entries(testSecrets).map(([k, val]) => {
+                        const isRevealed = !!revealedSecrets[k];
+                        const isUsingVault = !val;
+
+                        return (
+                          <div key={k} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(0,0,0,0.3)', padding: '6px 8px', borderRadius: '6px', border: '1px solid rgba(234, 179, 8, 0.2)' }}>
+                            <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: '#facc15', flexShrink: 0 }}>
+                              {k}:
+                            </span>
+                            <input
+                              type={isRevealed ? 'text' : 'password'}
+                              value={val}
+                              onChange={e => {
+                                const nextVal = e.target.value;
+                                setTestSecrets(prev => ({ ...prev, [k]: nextVal }));
+                              }}
+                              placeholder={isUsingVault ? '(Cofre do Banco)' : 'Senha de teste...'}
+                              style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '11px', width: '100%', outline: 'none' }}
+                            />
+                            <button
+                              type="button"
+                              className="btn-icon-subtle"
+                              style={{ padding: '2px', flexShrink: 0 }}
+                              onClick={() => toggleRevealSecret(k)}
+                              title={isRevealed ? 'Ocultar' : 'Visualizar'}
+                            >
+                              {isRevealed ? <EyeOff size={12} /> : <Eye size={12} />}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-icon-subtle btn-danger-hover"
+                              style={{ padding: '2px', flexShrink: 0 }}
+                              onClick={() => {
+                                setTestSecrets(prev => {
+                                  const copy = { ...prev };
+                                  delete copy[k];
+                                  return copy;
+                                });
+                              }}
+                              title={`Remover secret ${k}`}
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -542,7 +846,7 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
               <div className="sandbox-empty-steps">
                 <FlaskConical size={32} color="var(--text-dark)" />
                 <p>Nenhuma ação adicionada nesta sequência de teste.</p>
-                <span>Utilize os botões acima para adicionar uma ação e executá-la individualmente.</span>
+                <span>Utilize a paleta acima para adicionar etapas ou clique em "Importar..." para carregar uma pipeline.</span>
               </div>
             ) : (
               steps.map((step, index) => {
@@ -556,9 +860,31 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
                   >
                     {/* Step Card Header */}
                     <div className="step-card-header">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                         <span className="step-card-index">{index + 1}</span>
+
+                        {/* Source Block Badge (Requirement 2: visual source tracking for pipelines) */}
+                        {step.sourceBlockName && (
+                          <span
+                            className="badge"
+                            style={{
+                              fontSize: '10px',
+                              padding: '2px 7px',
+                              background: 'rgba(168, 85, 247, 0.15)',
+                              color: '#d8b4fe',
+                              border: '1px solid rgba(168, 85, 247, 0.3)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                            title={`Etapa originária do bloco "${step.sourceBlockName}"`}
+                          >
+                            <Boxes size={10} /> {step.sourceBlockName}
+                          </span>
+                        )}
+
                         <span className="step-type-badge">{step.type}</span>
+
                         {result && (
                           <span
                             className={`badge ${result.success ? 'badge-success' : 'badge-danger'}`}
@@ -1146,6 +1472,120 @@ export default function SandboxView({ initialBlock = null, onSavedBlock = null }
                     <Save size={14} /> Salvar no Repositório
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Import Modal */}
+      {showImportModal && (
+        <div className="modal-overlay" onClick={() => setShowImportModal(false)} style={{ zIndex: 1200 }}>
+          <div className="modal-content" style={{ maxWidth: '620px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FolderInput size={18} color="var(--color-primary)" /> Importar para o Live Sandbox
+              </h3>
+              <p className="text-muted" style={{ fontSize: '12px', margin: '4px 0 0' }}>
+                Selecione uma Pipeline para importar todas as suas ações em sequência, ou escolha um Bloco individual.
+              </p>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
+                <button
+                  type="button"
+                  className={`btn-subtle-tab ${importModalTab === 'pipelines' ? 'active' : ''}`}
+                  onClick={() => setImportModalTab('pipelines')}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <Workflow size={14} /> Pipelines ({tasks.length})
+                </button>
+                <button
+                  type="button"
+                  className={`btn-subtle-tab ${importModalTab === 'blocks' ? 'active' : ''}`}
+                  onClick={() => setImportModalTab('blocks')}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <Boxes size={14} /> Blocos ({blocks.length})
+                </button>
+              </div>
+            </div>
+
+            <div className="modal-body" style={{ maxHeight: '380px', overflowY: 'auto' }}>
+              {importModalTab === 'pipelines' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {tasks.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                      Nenhuma pipeline cadastrada no sistema.
+                    </div>
+                  ) : (
+                    tasks.map(task => (
+                      <div
+                        key={task.id}
+                        className="list-item"
+                        style={{ padding: '10px 14px', cursor: 'pointer' }}
+                        onClick={() => {
+                          loadSource({ type: 'pipeline', data: task });
+                          setShowImportModal(false);
+                        }}
+                      >
+                        <div style={{ flexGrow: 1 }}>
+                          <h4 style={{ margin: 0, fontSize: '13px', color: 'var(--text-light)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Workflow size={13} color="#c084fc" /> {task.name}
+                          </h4>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                            {task.description || `${task.blocks?.length || 0} blocos encadeados`}
+                          </span>
+                        </div>
+                        <span className="badge badge-info" style={{ fontSize: '11px' }}>
+                          {task.blocks?.length || 0} blocos
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {importModalTab === 'blocks' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {blocks.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                      Nenhum bloco cadastrado no sistema.
+                    </div>
+                  ) : (
+                    blocks.map(blk => (
+                      <div
+                        key={blk.id}
+                        className="list-item"
+                        style={{ padding: '10px 14px', cursor: 'pointer' }}
+                        onClick={() => {
+                          loadSource({ type: 'block', data: blk });
+                          setShowImportModal(false);
+                        }}
+                      >
+                        <div style={{ flexGrow: 1 }}>
+                          <h4 style={{ margin: 0, fontSize: '13px', color: 'var(--text-light)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Boxes size={13} color="#60a5fa" /> {blk.name}
+                          </h4>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                            {blk.description || `${blk.steps?.length || 0} etapas`}
+                          </span>
+                        </div>
+                        <span className="badge badge-info" style={{ fontSize: '11px' }}>
+                          {blk.steps?.length || 0} etapas
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowImportModal(false)}
+              >
+                Fechar
               </button>
             </div>
           </div>

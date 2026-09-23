@@ -4,18 +4,28 @@ import {
   LogOut,
   ChevronRight,
   Activity,
-  Play
+  Play,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useData } from '../../context/DataContext';
 
-export default function Header({ activeTab, activeSubItem, onNavigate, onOpenCommandPalette }) {
+export default function Header({
+  activeTab,
+  activeSubItem,
+  onNavigate,
+  onOpenCommandPalette,
+  isSidebarCollapsed = false,
+  onToggleSidebar
+}) {
   const { authRequired, logout } = useAuth();
   const { activeRuns } = useData();
 
   const tabLabels = {
     dashboard: 'Dashboard',
     blocks: 'Blocos de Ação',
+    sandbox: 'Live Sandbox',
     tasks: 'Pipelines',
     scheduler: 'Agendamentos',
     logs: 'Histórico & Logs',
@@ -28,6 +38,17 @@ export default function Header({ activeTab, activeSubItem, onNavigate, onOpenCom
     <header className="top-header">
       {/* Breadcrumbs Navigation */}
       <div className="breadcrumbs">
+        {onToggleSidebar && (
+          <button
+            type="button"
+            className="sidebar-header-toggle"
+            onClick={onToggleSidebar}
+            title={isSidebarCollapsed ? 'Expandir menu lateral' : 'Recolher menu lateral'}
+          >
+            {isSidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+          </button>
+        )}
+
         <span className="breadcrumb-item" onClick={() => onNavigate('dashboard')}>
           AutoRPA
         </span>

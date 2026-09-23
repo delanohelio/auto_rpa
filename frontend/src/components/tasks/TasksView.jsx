@@ -11,7 +11,8 @@ import {
   Search,
   Shield,
   Bot,
-  Code
+  Code,
+  FlaskConical
 } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
@@ -19,7 +20,7 @@ import TaskEditorModal from './TaskEditorModal';
 import TaskRunModal from './TaskRunModal';
 import CodeViewer from '../code/CodeViewer';
 
-export default function TasksView({ initialEditingId, onClearInitialEditingId, onNavigateToLogs }) {
+export default function TasksView({ initialEditingId, onClearInitialEditingId, onNavigateToLogs, onTestInSandbox }) {
   const { tasks, blocks, saveTask, deleteTask, triggerTaskRun } = useData();
   const toast = useToast();
 
@@ -227,6 +228,14 @@ export default function TasksView({ initialEditingId, onClearInitialEditingId, o
                       title="Exportar JSON"
                     >
                       <Download size={13} />
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => onTestInSandbox?.(task)}
+                      title="Testar todas as ações da pipeline em tempo real no Sandbox"
+                      style={{ color: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.4)' }}
+                    >
+                      <FlaskConical size={13} /> Testar no Sandbox
                     </button>
                     <button
                       className="btn btn-secondary btn-sm"

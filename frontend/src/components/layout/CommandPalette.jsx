@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 
-export default function CommandPalette({ isOpen, onClose, onNavigate, onTriggerTask }) {
+export default function CommandPalette({ isOpen, onClose, onNavigate, onTriggerTask, onTestInSandbox }) {
   const { blocks, tasks } = useData();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -63,6 +63,17 @@ export default function CommandPalette({ isOpen, onClose, onNavigate, onTriggerT
           action: () => onNavigate('tasks', task.id)
         });
         result.push({
+          id: `task_sandbox_${task.id}`,
+          title: `Testar no Sandbox: ${task.name}`,
+          sub: 'Importar ações da pipeline no Live Sandbox',
+          group: 'Sandbox',
+          icon: FlaskConical,
+          action: () => {
+            onTestInSandbox?.({ type: 'pipeline', data: task });
+            onNavigate('sandbox');
+          }
+        });
+        result.push({
           id: `task_run_${task.id}`,
           title: `Executar: ${task.name}`,
           sub: 'Disparar execução agora',
@@ -84,11 +95,22 @@ export default function CommandPalette({ isOpen, onClose, onNavigate, onTriggerT
           icon: Boxes,
           action: () => onNavigate('blocks', block.id)
         });
+        result.push({
+          id: `block_sandbox_${block.id}`,
+          title: `Testar no Sandbox: ${block.name}`,
+          sub: 'Carregar ações do bloco no Live Sandbox',
+          group: 'Sandbox',
+          icon: FlaskConical,
+          action: () => {
+            onTestInSandbox?.({ type: 'block', data: block });
+            onNavigate('sandbox');
+          }
+        });
       }
     });
 
     return result.slice(0, 25);
-  }, [query, tasks, blocks, onNavigate, onTriggerTask]);
+  }, [query, tasks, blocks, onNavigate, onTriggerTask, onTestInSandbox]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'ArrowDown') {

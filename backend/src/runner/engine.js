@@ -38,20 +38,23 @@ export const activeRunStreams = new Map();
 export function resolveText(text, decryptedSecrets = {}, mergedParams = {}) {
   if (typeof text !== 'string') return text;
   
-  // 1. Resolve parameters first
-  let resolved = text.replace(/\{\{param:([^}]+)\}\}/g, (match, paramName) => {
-    if (mergedParams[paramName] !== undefined) {
-      return mergedParams[paramName];
+  // 1. Resolve {{param:key}} or direct {{key}} from mergedParams & decryptedSecrets
+  let resolved = text.replace(/\{\{(?:param:)?([^}]+)\}\}/g, (match, key) => {
+    if (mergedParams[key] !== undefined) {
+      return mergedParams[key];
     }
-    return ''; // Fallback empty string if not defined
-  });
-
-  // 2. Resolve secrets second
-  resolved = resolved.replace(/\{\{secret:([^}]+)\}\}/g, (match, key) => {
-    if (decryptedSecrets[key] !== undefined) {
+    if (decryptedSecrets[key] !== undefined && decryptedSecrets[key] !== '') {
       return decryptedSecrets[key];
     }
-    return match; // Keep unresolved variables
+    return match;
+  });
+
+  // 2. Resolve explicit {{secret:key}} from decryptedSecrets
+  resolved = resolved.replace(/\{\{secret:([^}]+)\}\}/g, (match, key) => {
+    if (decryptedSecrets[key] !== undefined && decryptedSecrets[key] !== '') {
+      return decryptedSecrets[key];
+    }
+    return match;
   });
 
   return resolved;

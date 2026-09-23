@@ -31,7 +31,7 @@ function AppContent() {
     return params.get('id') || null;
   });
 
-  const [sandboxInitialBlock, setSandboxInitialBlock] = useState(null);
+  const [sandboxInitialData, setSandboxInitialData] = useState(null);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [quickRunTask, setQuickRunTask] = useState(null);
 
@@ -130,7 +130,7 @@ function AppContent() {
           initialEditingId={activeId}
           onClearInitialEditingId={() => setActiveId(null)}
           onTestInSandbox={(block) => {
-            setSandboxInitialBlock(block);
+            setSandboxInitialData({ type: 'block', data: block });
             handleNavigate('sandbox');
           }}
         />
@@ -138,9 +138,9 @@ function AppContent() {
 
       {activeTab === 'sandbox' && (
         <SandboxView
-          initialBlock={sandboxInitialBlock}
+          initialData={sandboxInitialData}
           onSavedBlock={() => {
-            setSandboxInitialBlock(null);
+            setSandboxInitialData(null);
             handleNavigate('blocks');
           }}
         />
@@ -151,6 +151,10 @@ function AppContent() {
           initialEditingId={activeId}
           onClearInitialEditingId={() => setActiveId(null)}
           onNavigateToLogs={() => handleNavigate('logs')}
+          onTestInSandbox={(task) => {
+            setSandboxInitialData({ type: 'pipeline', data: task });
+            handleNavigate('sandbox');
+          }}
         />
       )}
 
@@ -177,6 +181,7 @@ function AppContent() {
         onClose={() => setIsCommandPaletteOpen(false)}
         onNavigate={handleNavigate}
         onTriggerTask={(task) => setQuickRunTask(task)}
+        onTestInSandbox={(target) => setSandboxInitialData(target)}
       />
 
       {/* Quick Run Modal from Dashboard or Command Palette */}

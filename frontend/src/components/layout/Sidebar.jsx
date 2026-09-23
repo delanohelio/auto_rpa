@@ -7,11 +7,13 @@ import {
   FileText,
   Settings,
   Bot,
-  FlaskConical
+  FlaskConical,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 
-export default function Sidebar({ activeTab, onSelectTab }) {
+export default function Sidebar({ activeTab, onSelectTab, isCollapsed = false, onToggleCollapse }) {
   const { tasks, blocks, schedules, activeRuns } = useData();
 
   const navItems = [
@@ -53,15 +55,30 @@ export default function Sidebar({ activeTab, onSelectTab }) {
   ];
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
       <div className="logo-section">
-        <Bot size={28} color="var(--color-secondary)" />
-        <div>
-          <h1>AutoRPA</h1>
-          <span style={{ fontSize: '10px', color: 'var(--text-dark)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 700 }}>
-            v2.0 Orchestrator
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flexGrow: 1 }}>
+          <Bot size={28} color="var(--color-secondary)" style={{ flexShrink: 0 }} />
+          {!isCollapsed && (
+            <div style={{ minWidth: 0, overflow: 'hidden' }}>
+              <h1 style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>AutoRPA</h1>
+              <span style={{ fontSize: '10px', color: 'var(--text-dark)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>
+                v2.0 Orchestrator
+              </span>
+            </div>
+          )}
         </div>
+
+        {onToggleCollapse && (
+          <button
+            type="button"
+            className="sidebar-collapse-btn"
+            onClick={onToggleCollapse}
+            title={isCollapsed ? 'Expandir menu lateral' : 'Recolher menu lateral (apenas ícones)'}
+          >
+            {isCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
+        )}
       </div>
 
       <nav className="nav-links">
@@ -75,16 +92,17 @@ export default function Sidebar({ activeTab, onSelectTab }) {
               onClick={() => onSelectTab(item.id)}
               role="button"
               tabIndex={0}
+              title={isCollapsed ? item.label : undefined}
               onKeyDown={(e) => { if (e.key === 'Enter') onSelectTab(item.id); }}
             >
-              <Icon size={18} />
-              <span style={{ flexGrow: 1 }}>{item.label}</span>
+              <Icon size={18} style={{ flexShrink: 0 }} />
+              {!isCollapsed && <span style={{ flexGrow: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.label}</span>}
 
               {item.pulse && (
-                <span className="active-pulse-dot" style={{ marginRight: '4px' }} />
+                <span className="active-pulse-dot" style={{ marginRight: isCollapsed ? 0 : '4px' }} />
               )}
 
-              {item.badge && (
+              {!isCollapsed && item.badge && (
                 <span
                   style={{
                     fontSize: '11px',
@@ -93,7 +111,8 @@ export default function Sidebar({ activeTab, onSelectTab }) {
                     borderRadius: '12px',
                     backgroundColor: item.badgeColor ? 'rgba(59, 130, 246, 0.2)' : 'rgba(255, 255, 255, 0.06)',
                     color: item.badgeColor ? '#60a5fa' : 'var(--text-muted)',
-                    border: '1px solid rgba(255, 255, 255, 0.08)'
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    whiteSpace: 'nowrap'
                   }}
                 >
                   {item.badge}
@@ -105,11 +124,19 @@ export default function Sidebar({ activeTab, onSelectTab }) {
       </nav>
 
       <div className="sidebar-footer">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginBottom: '4px' }}>
-          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--color-success)' }} />
-          <span>Motor RPA Ativo</span>
-        </div>
-        <div>Playwright Chromium • AES-256</div>
+        {!isCollapsed ? (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginBottom: '4px' }}>
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--color-success)' }} />
+              <span>Motor RPA Ativo</span>
+            </div>
+            <div>Playwright Chromium • AES-256</div>
+          </>
+        ) : (
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '4px 0' }} title="Motor RPA Ativo (Playwright Chromium • AES-256)">
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--color-success)', display: 'block' }} />
+          </div>
+        )}
       </div>
     </aside>
   );

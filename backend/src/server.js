@@ -688,11 +688,12 @@ app.get('/api/sandbox/stream', (req, res) => {
 // POST /api/sandbox/execute-step - Execute a single step live on the sandbox page
 app.post('/api/sandbox/execute-step', async (req, res) => {
   try {
-    const { step, parameters = {}, secrets = {} } = req.body;
+    const { step, parameters = {}, parameterOverrides = {}, secrets = {} } = req.body;
     if (!step || !step.type) {
       return res.status(400).json({ error: 'Configuração da etapa (step) é obrigatória.' });
     }
-    const result = await sandboxManager.executeStep(step, parameters, secrets);
+    const finalParams = { ...parameters, ...parameterOverrides };
+    const result = await sandboxManager.executeStep(step, finalParams, secrets);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });

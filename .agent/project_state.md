@@ -9,7 +9,7 @@
   - Design: `Cyberpunk Dark Theme + Glassmorphism + Modal System 2.0`
 - **Current Phase**: `COMPLETE`
 - **Active Persona**: `web-dev-orchestrator`
-- **Last Updated**: 2026-09-18 16:25
+- **Last Updated**: 2026-09-23 14:35
 
 ## 🎯 Project Goals & Scope
 - **Goal 1 (UX & Navigation 2.0)**: Decompose monolithic 2,979-line `App.jsx` into focused, high-performance modular components. Introduce Command Palette (⌘K), browser history URL synchronization, breadcrumbs, non-blocking toast notifications, and fluid micro-transitions.
@@ -28,6 +28,16 @@
   - Left column: Action sequencing, configuration, individual "Executar Ação" (`Play`) with real-time feedback, "Executar Todas", and "Salvar Bloco de Ação".
   - Right column: Real-time browser screencast, address bar with direct navigation, and dedicated "Resetar Navegador" button (`RotateCcw`) to reset to `about:blank`.
   - Integrated into Sidebar, Command Palette (⌘K), and BlocksView ("Testar no Sandbox").
+- **Goal 7 (Collapsible Sidebar / Modo Compacto de Ícones)**:
+  - Permite recolher a barra lateral para modo apenas ícones (`74px`), expandindo significativamente a área de trabalho do estúdio e dashboards.
+  - Persistência em `localStorage` (`autorpa_sidebar_collapsed`) e transição CSS fluida.
+- **Goal 8 (Pipeline Testing no Live Sandbox)**:
+  - Permite importar e testar pipelines completos no Sandbox, desmembrando e ordenando sequencialmente todas as ações dos blocos que o compõem.
+  - Badges visuais indicando a qual bloco cada ação pertence (`step.sourceBlockName`).
+- **Goal 9 & 10 (Importação e Edição de Variáveis e Secrets no Sandbox)**:
+  - Importação automática de parâmetros padrão de blocos e substituições configuradas na pipeline.
+  - Resolução automática de secrets confidenciais protegidos no cofre criptografado (AES-256) com fallback transparente se não sobrescritos.
+  - Painel/Gaveta com abas **Variáveis (Parâmetros)** e **Secrets** para criar, editar, alternar visibilidade de senhas (`Eye`/`EyeOff`) e testar valores em tempo de execução.
 
 ## 📋 Phase Progress Tracker
 - [x] **Phase 1: Discovery & Scope**
@@ -38,11 +48,14 @@
   - [x] Layout specifications for responsive sidebar, header, and drawers.
   - [x] Modal System 2.0 layout and clean 2-column grid (`.step-col-full`).
   - [x] 2-column Live Sandbox Studio layout and screencast styles.
+  - [x] Compact sidebar styles (`.sidebar.collapsed`, `74px 1fr` grid transition, `.sidebar-collapse-btn`).
 - [x] **Phase 3: Architecture & Contracts**
   - [x] Shared API contracts documented in `.agent/architecture_contracts.md`.
   - [x] Backend routes and DB helpers implemented (`/api/system/stats`, `/api/runs/active`, paginated logs, `secretKeyRenames` in `POST /api/blocks`).
   - [x] Live screencast endpoints (`/api/runs/:runId/stream` and `/api/sandbox/stream`).
   - [x] Sandbox session manager (`SandboxManager`) with CDP screencast, step execution, and session reset.
+  - [x] Sandbox vault secrets auto-resolution via `db.getBlock` and AES-256 decryption.
+  - [x] Extended `resolveText` to support `{{param:key}}`, `{{secret:key}}`, and direct `{{key}}` syntax.
 - [x] **Phase 4: Phased Implementation**
   - [x] Frontend context layer (`AuthContext`, `ToastContext`, `DataContext`).
   - [x] Code presentation and validation components (`CodeViewer`, `CodeEditor`, `JsonViewer`, `HtmlViewerModal`).
@@ -53,8 +66,13 @@
   - [x] Inline parameter and secret editors implemented in `BlockEditorModal`.
   - [x] Live stream screencast player embedded in `LogDetailsModal`.
   - [x] Full-featured `SandboxView` with individual action runner, live browser screencast, reset button, and block persistence.
+  - [x] Sidebar collapse toggle button and header integration with `localStorage` persistence.
+  - [x] Pipeline import modal & sequential step unrolling with block origin badges in Sandbox.
+  - [x] Editable Sandbox Variables & Secrets 2-tab drawer.
+  - [x] "Testar no Sandbox" buttons in `TasksView` cards and Command Palette.
 - [x] **Phase 5: Quality Gate & Code Review**
   - [x] Production build verified (`npm run build`).
   - [x] Endpoints and DB persistence tests verified.
   - [x] SandboxManager lifecycle verified (`test_sandbox.js`).
   - [x] Pipeline LiveView execution & stream cleanup verified (`test_pipeline_liveview.js`).
+  - [x] Sandbox pipeline import and secrets resolution verified (`test_sandbox_pipeline_import.js`).
