@@ -543,9 +543,24 @@ export async function runTask(
       });
     }
 
+    let activeStepLog = null;
     page = await context.newPage();
     activeRunPages.set(runId, page);
     await page.goto('about:blank');
+
+    // Expose __rpaLog to page context for real-time logging from JS eval actions (Requirement 2)
+    try {
+      await page.exposeFunction('__rpaLog', (msg) => {
+        console.log(`[Task ${taskId} Run ${runId}] [JS Log]: ${msg}`);
+        if (activeStepLog) {
+          if (!activeStepLog.userLogs) activeStepLog.userLogs = [];
+          activeStepLog.userLogs.push(msg);
+          if (!activeStepLog.data) activeStepLog.data = {};
+          activeStepLog.data.userLogs = activeStepLog.userLogs;
+          try { db.addLog(logRecord); } catch (_) {}
+        }
+      });
+    } catch (_) {}
 
     // Inject execution variables into page context (Requirement 2)
     await page.addInitScript((initialVars) => {
@@ -669,6 +684,7 @@ export async function runTask(
         };
 
         logRecord.stepsExecuted.push(stepLog);
+        activeStepLog = stepLog;
         db.addLog(logRecord); // Update log state so UI shows step as running
 
         // Handle conditional skipping
@@ -810,6 +826,23 @@ export async function runTask(
                 const getVar = (name) => window.executionVars[name];
                 const vars = window.executionVars;
 
+                const userLogs = [];
+                const log = (...args) => {
+                  const formatted = args.map(a => {
+                    if (a === null) return 'null';
+                    if (a === undefined) return 'undefined';
+                    if (typeof a === 'object') {
+                      try { return JSON.stringify(a); } catch (_) { return String(a); }
+                    }
+                    return String(a);
+                  }).join(' ');
+                  userLogs.push(formatted);
+                  if (typeof window.__rpaLog === 'function') {
+                    try { window.__rpaLog(formatted); } catch (_) {}
+                  }
+                };
+                window.log = log;
+
                 let body = script.trim();
                 // Support legacy IIFE e.g. (() => { ... })()
                 if (body.startsWith('(() =>') || body.startsWith('(function')) {
@@ -819,12 +852,13 @@ export async function runTask(
                 }
 
                 const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-                const fn = new AsyncFunction('vars', 'executionVars', 'params', 'secrets', 'setVar', 'getVar', body);
-                const userResult = await fn(vars, vars, params, secrets, setVar, getVar);
+                const fn = new AsyncFunction('vars', 'executionVars', 'params', 'secrets', 'setVar', 'getVar', 'log', body);
+                const userResult = await fn(vars, vars, params, secrets, setVar, getVar, log);
 
                 return {
                   userResult: userResult !== undefined ? userResult : null,
-                  updatedExecutionVars: { ...window.executionVars }
+                  updatedExecutionVars: { ...window.executionVars },
+                  userLogs: [...userLogs]
                 };
               }, {
                 script,
@@ -832,6 +866,15 @@ export async function runTask(
                 params: mergedParams,
                 secrets: decryptedSecrets
               });
+
+              if (evalRes.userLogs && evalRes.userLogs.length > 0) {
+                if (!stepLog.userLogs) stepLog.userLogs = [];
+                evalRes.userLogs.forEach(ul => {
+                  if (!stepLog.userLogs.includes(ul)) {
+                    stepLog.userLogs.push(ul);
+                  }
+                });
+              }
 
               const output = evalRes.userResult;
               if (evalRes.updatedExecutionVars) {
@@ -848,6 +891,7 @@ export async function runTask(
                 result: output !== undefined ? output : null,
                 returnValue: output !== undefined ? output : null,
                 hasOutput: output !== undefined,
+                userLogs: stepLog.userLogs || [],
                 executionVars: { ...executionVars },
                 message: output !== undefined
                   ? (typeof output === 'object' && output !== null

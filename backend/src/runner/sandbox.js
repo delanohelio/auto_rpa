@@ -420,12 +420,26 @@ class SandboxManager {
             if (!window.vars) window.vars = window.executionVars;
             Object.assign(window.executionVars, initialExecutionVars);
 
+            const userLogs = [];
+            const log = (...args) => {
+              const formatted = args.map(a => {
+                if (a === null) return 'null';
+                if (a === undefined) return 'undefined';
+                if (typeof a === 'object') {
+                  try { return JSON.stringify(a); } catch (_) { return String(a); }
+                }
+                return String(a);
+              }).join(' ');
+              userLogs.push(formatted);
+            };
+            window.log = log;
+
             const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
             let fn;
             try {
-              fn = new AsyncFunction('vars', 'executionVars', 'params', 'secrets', 'setVar', 'getVar', scriptBody);
+              fn = new AsyncFunction('vars', 'executionVars', 'params', 'secrets', 'setVar', 'getVar', 'log', scriptBody);
             } catch (compileErr) {
-              fn = new AsyncFunction('vars', 'executionVars', 'params', 'secrets', 'setVar', 'getVar', `return (${scriptBody});`);
+              fn = new AsyncFunction('vars', 'executionVars', 'params', 'secrets', 'setVar', 'getVar', 'log', `return (${scriptBody});`);
             }
 
             const setVar = (key, val) => {
@@ -434,10 +448,11 @@ class SandboxManager {
             };
             const getVar = (key) => window.executionVars[key];
 
-            const result = await fn(window.vars, window.executionVars, params, secrets, setVar, getVar);
+            const result = await fn(window.vars, window.executionVars, params, secrets, setVar, getVar, log);
             return {
               result,
-              updatedExecutionVars: { ...window.executionVars }
+              updatedExecutionVars: { ...window.executionVars },
+              userLogs
             };
           }, {
             scriptBody: script,
@@ -451,6 +466,9 @@ class SandboxManager {
           }
 
           const output = evalResult ? evalResult.result : undefined;
+          if (evalResult && evalResult.userLogs) {
+            resultLog.userLogs = evalResult.userLogs;
+          }
 
           resultLog.data = {
             result: output !== undefined ? output : null,

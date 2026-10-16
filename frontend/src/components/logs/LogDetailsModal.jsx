@@ -22,7 +22,8 @@ import {
   Globe,
   Square,
   Bot,
-  Camera
+  Camera,
+  Terminal
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -600,6 +601,31 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                               )}
                             </div>
                           )}
+
+                          {/* User JS Logs Viewer */}
+                          {((step.userLogs?.length > 0) || (step.data?.userLogs?.length > 0)) && (
+                            <div
+                              style={{
+                                marginTop: '8px',
+                                background: 'rgba(0, 0, 0, 0.45)',
+                                border: '1px solid rgba(168, 85, 247, 0.3)',
+                                borderRadius: 'var(--radius-sm)',
+                                padding: '8px 10px'
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '6px', fontSize: '11px', color: '#c084fc', fontWeight: 600 }}>
+                                <Terminal size={12} /> Logs da Função ({((step.userLogs || step.data?.userLogs) || []).length}):
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+                                {((step.userLogs || step.data?.userLogs) || []).map((msg, mIdx) => (
+                                  <div key={mIdx} style={{ color: '#e2e8f0', background: 'rgba(255, 255, 255, 0.04)', padding: '3px 6px', borderRadius: '3px', wordBreak: 'break-word' }}>
+                                    <span style={{ color: '#c084fc', marginRight: '6px', fontWeight: 'bold' }}>&gt;</span>
+                                    {msg}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           {/* Step screenshot preview */}
                           {step.screenshotPath && (
                             <div
@@ -969,6 +995,31 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                                 {step.data.result === undefined ? 'undefined' : step.data.result === null ? 'null' : String(step.data.result)}
                               </pre>
                             )}
+                          </div>
+                        )}
+
+                        {/* User JS Logs Viewer */}
+                        {((step.userLogs?.length > 0) || (step.data?.userLogs?.length > 0)) && (
+                          <div
+                            style={{
+                              marginTop: '10px',
+                              background: 'rgba(0, 0, 0, 0.45)',
+                              border: '1px solid rgba(168, 85, 247, 0.3)',
+                              borderRadius: 'var(--radius-md)',
+                              padding: '10px 14px'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', fontSize: '12px', color: '#c084fc', fontWeight: 600 }}>
+                              <Terminal size={14} /> Logs da Função ({((step.userLogs || step.data?.userLogs) || []).length}):
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
+                              {((step.userLogs || step.data?.userLogs) || []).map((msg, mIdx) => (
+                                <div key={mIdx} style={{ color: '#e2e8f0', background: 'rgba(255, 255, 255, 0.04)', padding: '5px 8px', borderRadius: '4px', wordBreak: 'break-word' }}>
+                                  <span style={{ color: '#c084fc', marginRight: '8px', fontWeight: 'bold' }}>&gt;</span>
+                                  {msg}
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         )}
 

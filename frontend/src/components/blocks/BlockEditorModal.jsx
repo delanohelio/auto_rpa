@@ -27,6 +27,7 @@ import {
   formatOptionsToText
 } from '../../utils/variableTypes';
 import TypedVariableInput from '../common/TypedVariableInput';
+import JsDocsModal from '../common/JsDocsModal';
 
 export default function BlockEditorModal({ block, onSave, onClose }) {
   const [editingBlock, setEditingBlock] = useState(() => {
@@ -62,6 +63,7 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
   const [editParamOptions, setEditParamOptions] = useState('');
   const [editParamDefault, setEditParamDefault] = useState('');
   const [editParamDesc, setEditParamDesc] = useState('');
+  const [showJsDocsModal, setShowJsDocsModal] = useState(false);
 
   const handleNewParamTypeChange = (type) => {
     setNewParamType(type);
@@ -702,14 +704,36 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                           {/* Eval Step with CodeEditor and Syntax Validation */}
                           {step.type === 'eval' && (
                             <div className="step-col-full">
-                              <label style={{ fontSize: '11px', display: 'block', marginBottom: '6px' }}>
-                                Corpo da Função JavaScript a Executar (Não é necessário função anônima; variáveis de execução em <code style={{ color: 'var(--color-secondary)' }}>vars.nome</code>)
-                              </label>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                <label style={{ fontSize: '11px', display: 'block', margin: 0 }}>
+                                  Corpo da Função JavaScript a Executar (variáveis em <code style={{ color: 'var(--color-secondary)' }}>vars.nome</code>)
+                                </label>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => setShowJsDocsModal(true)}
+                                  style={{
+                                    fontSize: '11px',
+                                    padding: '3px 8px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                    background: 'rgba(59, 130, 246, 0.1)',
+                                    border: '1px solid rgba(59, 130, 246, 0.3)',
+                                    color: '#93c5fd'
+                                  }}
+                                  title="Abrir guia de como acessar parâmetros, variáveis globais e logs"
+                                >
+                                  <HelpCircle size={13} color="var(--color-primary)" />
+                                  Guia de Uso & Tipos de Dados
+                                </button>
+                              </div>
                               <CodeEditor
                                 value={step.script || ''}
                                 onChange={val => updateStepField(index, 'script', val)}
                                 language="javascript"
                                 rows={6}
+                                placeholder="// Escreva diretamente o corpo da função\nlog('Iniciando processamento...');\nvars.contador = (vars.contador || 0) + 1;\nreturn { status: 'OK', total: vars.contador };"
                               />
                               <div style={{ marginTop: '12px' }}>
                                 <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Salvar Saída em Arquivo (Opcional)</label>
@@ -845,21 +869,30 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                   Declare parâmetros dinâmicos para o bloco. Nas etapas, acesse os valores com a sintaxe <code style={{ color: 'var(--color-secondary)' }}>{'{{param:nome}}'}</code>.
                 </p>
 
-                {/* Form to add new parameter */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', background: 'rgba(255, 255, 255, 0.02)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 1.5fr 1.5fr auto', gap: '10px', alignItems: 'flex-end' }}>
+                {/* Form to add new parameter (Multi-line layout) */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(255, 255, 255, 0.02)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-light)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Plus size={14} color="var(--color-primary)" /> Adicionar Novo Parâmetro
+                  </div>
+
+                  {/* Line 1: Name, Type, Description */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '12px' }}>
                     <div>
-                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Nome da Variável *</label>
+                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px', color: 'var(--text-muted)' }}>
+                        Nome da Variável * <span style={{ fontSize: '10px' }}>(ex: termo_busca)</span>
+                      </label>
                       <input
                         type="text"
                         className="form-control"
-                        placeholder="termo_busca"
+                        placeholder="nome_variavel"
                         value={newParamName}
                         onChange={e => setNewParamName(e.target.value)}
                       />
                     </div>
                     <div>
-                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Tipo da Variável</label>
+                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px', color: 'var(--text-muted)' }}>
+                        Tipo da Variável
+                      </label>
                       <select
                         className="form-control"
                         value={newParamType}
@@ -871,33 +904,47 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                       </select>
                     </div>
                     <div>
-                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Valor Padrão</label>
+                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px', color: 'var(--text-muted)' }}>
+                        Descrição (Opcional)
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Finalidade deste parâmetro"
+                        value={newParamDesc}
+                        onChange={e => setNewParamDesc(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Line 2: Default Value Input + Action Button */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '12px', alignItems: 'flex-end', marginTop: '4px' }}>
+                    <div>
+                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px', color: 'var(--text-muted)' }}>
+                        Valor Padrão Inicial
+                      </label>
                       <TypedVariableInput
                         type={newParamType}
                         value={newParamDefault}
                         onChange={setNewParamDefault}
                         options={newParamOptions}
-                        size="sm"
+                        size="md"
                       />
                     </div>
-                    <div>
-                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Descrição (Opcional)</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        placeholder="Descrição da finalidade"
-                        value={newParamDesc}
-                        onChange={e => setNewParamDesc(e.target.value)}
-                      />
-                    </div>
-                    <button type="button" className="btn btn-secondary" onClick={handleAddParam} style={{ height: '36px' }}>
-                      <Plus size={14} /> Adicionar
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={handleAddParam}
+                      style={{ height: '38px', padding: '0 16px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <Plus size={15} /> Adicionar Parâmetro
                     </button>
                   </div>
 
+                  {/* Line 3 (when select or multiselect): Options textarea */}
                   {(newParamType === 'select' || newParamType === 'multiselect') && (
-                    <div style={{ marginTop: '4px', borderTop: '1px dashed rgba(255, 255, 255, 0.08)', paddingTop: '8px' }}>
-                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px', color: 'var(--color-primary)' }}>
+                    <div style={{ marginTop: '4px', borderTop: '1px dashed rgba(255, 255, 255, 0.08)', paddingTop: '10px' }}>
+                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px', color: 'var(--color-primary)', fontWeight: 600 }}>
                         Opções do {newParamType === 'multiselect' ? 'Multi Seleção' : 'Seletor'} (uma opção por linha)
                       </label>
                       <textarea
@@ -912,7 +959,7 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                   )}
                 </div>
 
-                {/* Parameters list */}
+                {/* Parameters list (Spacious cards) */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {(editingBlock.parameters || []).length === 0 ? (
                     <p className="text-muted" style={{ padding: '28px', textAlign: 'center', border: '1px dashed var(--border-color)', borderRadius: 'var(--radius-md)' }}>
@@ -926,21 +973,23 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                           <div
                             key={pIdx}
                             style={{
-                              padding: '12px 14px',
+                              padding: '16px',
                               background: 'rgba(59, 130, 246, 0.08)',
-                              border: '1px solid rgba(59, 130, 246, 0.3)',
+                              border: '1px solid rgba(59, 130, 246, 0.35)',
                               borderRadius: 'var(--radius-md)',
                               display: 'flex',
                               flexDirection: 'column',
-                              gap: '10px'
+                              gap: '12px'
                             }}
                           >
-                            <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-secondary)' }}>
+                            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-secondary)' }}>
                               Editando Parâmetro #{pIdx + 1}
                             </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 1.5fr 1.5fr auto', gap: '8px', alignItems: 'flex-end' }}>
+
+                            {/* Edit Line 1: Name, Type, Description */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
                               <div>
-                                <label style={{ fontSize: '10px', display: 'block', marginBottom: '2px', color: 'var(--text-muted)' }}>Nome</label>
+                                <label style={{ fontSize: '10px', display: 'block', marginBottom: '3px', color: 'var(--text-muted)' }}>Nome</label>
                                 <input
                                   type="text"
                                   className="form-control"
@@ -951,7 +1000,7 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                                 />
                               </div>
                               <div>
-                                <label style={{ fontSize: '10px', display: 'block', marginBottom: '2px', color: 'var(--text-muted)' }}>Tipo</label>
+                                <label style={{ fontSize: '10px', display: 'block', marginBottom: '3px', color: 'var(--text-muted)' }}>Tipo</label>
                                 <select
                                   className="form-control"
                                   value={editParamType}
@@ -963,17 +1012,7 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                                 </select>
                               </div>
                               <div>
-                                <label style={{ fontSize: '10px', display: 'block', marginBottom: '2px', color: 'var(--text-muted)' }}>Valor Padrão</label>
-                                <TypedVariableInput
-                                  type={editParamType}
-                                  value={editParamDefault}
-                                  onChange={setEditParamDefault}
-                                  options={editParamOptions}
-                                  size="sm"
-                                />
-                              </div>
-                              <div>
-                                <label style={{ fontSize: '10px', display: 'block', marginBottom: '2px', color: 'var(--text-muted)' }}>Descrição</label>
+                                <label style={{ fontSize: '10px', display: 'block', marginBottom: '3px', color: 'var(--text-muted)' }}>Descrição</label>
                                 <input
                                   type="text"
                                   className="form-control"
@@ -982,29 +1021,46 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                                   placeholder="Descrição opcional"
                                 />
                               </div>
+                            </div>
+
+                            {/* Edit Line 2: Default Value + Action Buttons */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '12px', alignItems: 'flex-end' }}>
+                              <div>
+                                <label style={{ fontSize: '10px', display: 'block', marginBottom: '3px', color: 'var(--text-muted)' }}>Valor Padrão</label>
+                                <TypedVariableInput
+                                  type={editParamType}
+                                  value={editParamDefault}
+                                  onChange={setEditParamDefault}
+                                  options={editParamOptions}
+                                  size="md"
+                                />
+                              </div>
                               <div style={{ display: 'flex', gap: '6px' }}>
                                 <button
                                   type="button"
-                                  className="btn btn-primary btn-sm"
+                                  className="btn btn-primary"
                                   onClick={() => handleSaveEditParam(pIdx)}
+                                  style={{ height: '38px', padding: '0 14px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
                                   title="Salvar alterações"
                                 >
-                                  <Check size={13} /> Salvar
+                                  <Check size={14} /> Salvar
                                 </button>
                                 <button
                                   type="button"
-                                  className="btn btn-secondary btn-sm"
+                                  className="btn btn-secondary"
                                   onClick={handleCancelEditParam}
+                                  style={{ height: '38px', padding: '0 10px' }}
                                   title="Cancelar edição"
                                 >
-                                  <X size={13} />
+                                  <X size={14} />
                                 </button>
                               </div>
                             </div>
 
+                            {/* Edit Line 3: Options */}
                             {(editParamType === 'select' || editParamType === 'multiselect') && (
-                              <div style={{ marginTop: '6px', borderTop: '1px dashed rgba(59, 130, 246, 0.2)', paddingTop: '6px' }}>
-                                <label style={{ fontSize: '10px', display: 'block', marginBottom: '2px', color: 'var(--color-primary)' }}>
+                              <div style={{ marginTop: '4px', borderTop: '1px dashed rgba(59, 130, 246, 0.2)', paddingTop: '8px' }}>
+                                <label style={{ fontSize: '10px', display: 'block', marginBottom: '2px', color: 'var(--color-primary)', fontWeight: 600 }}>
                                   Opções (uma por linha)
                                 </label>
                                 <textarea
@@ -1026,57 +1082,88 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                         ? `[${param.defaultValue.join(', ')}]`
                         : String(param.defaultValue ?? '');
 
+                      const getBadgeColor = (t) => {
+                        switch (t) {
+                          case 'number': return { bg: 'rgba(52, 211, 153, 0.15)', color: '#34d399', border: 'rgba(52, 211, 153, 0.3)' };
+                          case 'date': return { bg: 'rgba(96, 165, 250, 0.15)', color: '#60a5fa', border: 'rgba(96, 165, 250, 0.3)' };
+                          case 'datetime': return { bg: 'rgba(192, 132, 252, 0.15)', color: '#c084fc', border: 'rgba(192, 132, 252, 0.3)' };
+                          case 'select': return { bg: 'rgba(251, 191, 36, 0.15)', color: '#fbbf24', border: 'rgba(251, 191, 36, 0.3)' };
+                          case 'multiselect': return { bg: 'rgba(34, 211, 238, 0.15)', color: '#22d3ee', border: 'rgba(34, 211, 238, 0.3)' };
+                          default: return { bg: 'rgba(59, 130, 246, 0.15)', color: '#93c5fd', border: 'rgba(59, 130, 246, 0.3)' };
+                        }
+                      };
+                      const bStyle = getBadgeColor(paramType);
+
                       return (
                         <div
                           key={pIdx}
                           style={{
                             display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            padding: '12px 16px',
+                            flexDirection: 'column',
+                            gap: '8px',
+                            padding: '14px 16px',
                             background: 'var(--bg-input)',
                             border: '1px solid var(--border-color)',
-                            borderRadius: 'var(--radius-sm)'
+                            borderRadius: 'var(--radius-md)'
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span style={{ fontWeight: 600, color: 'var(--color-secondary)' }}>{'{{param:' + param.name + '}}'}</span>
-                            <span
-                              style={{
-                                fontSize: '11px',
-                                padding: '2px 8px',
-                                borderRadius: '12px',
-                                background: 'rgba(59, 130, 246, 0.15)',
-                                color: '#93c5fd',
-                                border: '1px solid rgba(59, 130, 246, 0.3)',
-                                fontWeight: 600
-                              }}
-                            >
-                              {typeObj?.label || paramType}
-                            </span>
-                            <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
-                              Padrão: "{displayDefault}"
-                              {param.options?.length > 0 && ` • (${param.options.length} opções)`}
-                              {param.description ? ` • ${param.description}` : ''}
-                            </span>
+                          {/* Card Row 1: Variable Name, Type Badge, and Actions */}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: 600, color: 'var(--color-secondary)', fontSize: '13px' }}>
+                                {'{{param:' + param.name + '}}'}
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: '11px',
+                                  padding: '2px 8px',
+                                  borderRadius: '12px',
+                                  background: bStyle.bg,
+                                  color: bStyle.color,
+                                  border: `1px solid ${bStyle.border}`,
+                                  fontWeight: 600
+                                }}
+                              >
+                                {typeObj?.label || paramType}
+                              </span>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => handleStartEditParam(pIdx)}
+                                title="Editar este parâmetro"
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              >
+                                <Edit2 size={12} /> Editar
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-danger btn-sm"
+                                onClick={() => handleRemoveParam(pIdx)}
+                                title="Excluir parâmetro"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
                           </div>
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => handleStartEditParam(pIdx)}
-                              title="Editar este parâmetro"
-                            >
-                              <Edit2 size={12} /> Editar
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-danger btn-sm"
-                              onClick={() => handleRemoveParam(pIdx)}
-                              title="Excluir parâmetro"
-                            >
-                              <Trash2 size={12} />
-                            </button>
+
+                          {/* Card Row 2: Default Value & Description & Options */}
+                          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                            <span style={{ background: 'rgba(255, 255, 255, 0.04)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                              Padrão: <strong style={{ color: '#e2e8f0' }}>"{displayDefault}"</strong>
+                            </span>
+                            {param.options?.length > 0 && (
+                              <span style={{ color: 'var(--color-primary)' }}>
+                                • ({param.options.length} opções cadastradas)
+                              </span>
+                            )}
+                            {param.description && (
+                              <span style={{ fontStyle: 'italic', color: 'var(--text-light)' }}>
+                                • {param.description}
+                              </span>
+                            )}
                           </div>
                         </div>
                       );
@@ -1265,6 +1352,12 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
           </div>
         </form>
       </div>
+
+      {/* JavaScript Documentation & Variable Types Modal */}
+      <JsDocsModal
+        isOpen={showJsDocsModal}
+        onClose={() => setShowJsDocsModal(false)}
+      />
     </div>
   );
 }

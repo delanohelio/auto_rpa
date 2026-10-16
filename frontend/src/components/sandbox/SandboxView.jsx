@@ -38,7 +38,8 @@ import {
   Key,
   X,
   GripVertical,
-  MousePointerClick
+  MousePointerClick,
+  HelpCircle
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -46,6 +47,7 @@ import { useData } from '../../context/DataContext';
 import CodeEditor from '../code/CodeEditor';
 import JsonViewer from '../code/JsonViewer';
 import HtmlSourceViewer from './HtmlSourceViewer';
+import JsDocsModal from '../common/JsDocsModal';
 
 export default function SandboxView({ initialData = null, onClearInitialData = null, onSavedBlock = null }) {
   const { apiFetch } = useAuth();
@@ -66,6 +68,7 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
   const [revealedSecrets, setRevealedSecrets] = useState({});
   const [showVariablesDrawer, setShowVariablesDrawer] = useState(false);
   const [activeVariablesTab, setActiveVariablesTab] = useState('params'); // 'params' | 'secrets'
+  const [showJsDocsModal, setShowJsDocsModal] = useState(false);
 
   // Browser & Session State
   const [isReady, setIsReady] = useState(false);
@@ -1699,11 +1702,28 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
                         {/* Eval / JS Execution */}
                         {step.type === 'eval' && (
                           <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                              <label style={{ fontSize: '11px', margin: 0 }}>Corpo da Função JavaScript (sem wrapper anônimo; variáveis em vars.nome)</label>
-                              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                                Retorno exibido abaixo e no log
-                              </span>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                              <label style={{ fontSize: '11px', margin: 0, fontWeight: 600 }}>
+                                Corpo da Função JavaScript (variáveis em <code style={{ color: 'var(--color-secondary)' }}>vars.nome</code>)
+                              </label>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => setShowJsDocsModal(true)}
+                                style={{
+                                  fontSize: '11px',
+                                  padding: '2px 8px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  background: 'rgba(59, 130, 246, 0.1)',
+                                  border: '1px solid rgba(59, 130, 246, 0.3)',
+                                  color: '#93c5fd'
+                                }}
+                              >
+                                <HelpCircle size={12} color="var(--color-primary)" />
+                                Guia & Tipos de Dados
+                              </button>
                             </div>
                             <CodeEditor
                               value={step.script || ''}
@@ -2447,6 +2467,12 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
           </div>
         </div>
       )}
+
+      {/* JS Documentation & Variable Types Modal */}
+      <JsDocsModal
+        isOpen={showJsDocsModal}
+        onClose={() => setShowJsDocsModal(false)}
+      />
     </div>
   );
 }
