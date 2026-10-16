@@ -10,6 +10,6 @@
     "build:frontend": "npm run build --prefix frontend"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.3"
+    "better-sqlite3": "12.11.1"
   }
 }

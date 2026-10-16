@@ -4,8 +4,8 @@ FROM mcr.microsoft.com/playwright:v1.44.0-jammy
 # Set working directory
 WORKDIR /app
 
-# Install Xvfb for headless container environments that need virtual headed displays
-RUN apt-get update && apt-get install -y --no-install-recommends xvfb && rm -rf /var/lib/apt/lists/*
+# Install Xvfb and xauth for headless container environments that need virtual headed displays
+RUN apt-get update && apt-get install -y --no-install-recommends xvfb xauth && rm -rf /var/lib/apt/lists/*
 
 # Copy package configurations
 COPY package.json ./
@@ -32,4 +32,4 @@ ENV PORT=3000
 ENV SECRET_KEY=default_super_secret_rpa_key_123
 
 # Start the application with xvfb-run support for headed browser emulation in Docker
-CMD ["sh", "-c", "if command -v xvfb-run > /dev/null 2>&1; then echo 'Iniciando AutoRPA com Xvfb (Virtual Framebuffer Display)...'; xvfb-run -a --server-args='-screen 0 1280x1024x24 -ac +extension GLX +render -noreset' node backend/src/server.js; else node backend/src/server.js; fi"]
+CMD ["sh", "-c", "rm -f /tmp/.X*-lock /tmp/.X11-unix/X* 2>/dev/null || true; if command -v xvfb-run > /dev/null 2>&1; then echo 'Iniciando AutoRPA com Xvfb (Virtual Framebuffer Display)...'; xvfb-run -a --server-args='-screen 0 1280x1024x24 -ac' node backend/src/server.js; else node backend/src/server.js; fi"]
