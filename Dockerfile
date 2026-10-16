@@ -4,8 +4,13 @@ FROM mcr.microsoft.com/playwright:v1.44.0-jammy
 # Set working directory
 WORKDIR /app
 
-# Install Xvfb and xauth for headless container environments that need virtual headed displays
-RUN apt-get update && apt-get install -y --no-install-recommends xvfb xauth && rm -rf /var/lib/apt/lists/*
+# Install Xvfb, xauth and build essentials (make, gcc, g++, python3) for compiling native modules (node-gyp / better-sqlite3)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xvfb \
+    xauth \
+    build-essential \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy package configurations
 COPY package.json ./
