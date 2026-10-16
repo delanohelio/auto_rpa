@@ -21,7 +21,8 @@ import {
   Columns,
   Globe,
   Square,
-  Bot
+  Bot,
+  Camera
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -38,9 +39,8 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
   const [viewingHtml, setViewingHtml] = useState(null);
   const [copiedEvalIdx, setCopiedEvalIdx] = useState(null);
 
-  // Live Stream & 2-Column Layout State
+  // Live Stream & Mode State
   const [streamKey, setStreamKey] = useState(Date.now());
-  const [isTwoColumns, setIsTwoColumns] = useState(true);
 
   // Interactive Prompt & Manual State
   const [promptFormValues, setPromptFormValues] = useState({});
@@ -232,8 +232,35 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
 
   if (!log) return null;
 
-  const showTwoColumns = isTwoColumns && (log.status === 'running' || log.liveView !== false || log.screenshotPath);
+  // Requirement 1: Lock the view strictly to the chosen execution mode
+  // 1.1: Headless (log.headless !== false) -> 1 column displaying only logs and screenshots
+  // 1.2: Headed (log.headless === false) -> 2 columns displaying left logs and right real-time browser
+  const isHeaded = log.headless === false;
+  const showTwoColumns = isHeaded;
   const streamUrl = `/api/runs/${log.id}/stream?t=${streamKey}${localStorage.getItem('systemPassword') ? `&token=${encodeURIComponent(localStorage.getItem('systemPassword'))}` : ''}`;
+
+  // Collect all screenshots captured during this execution
+  const allScreenshots = [];
+  if (log.stepsExecuted && Array.isArray(log.stepsExecuted)) {
+    log.stepsExecuted.forEach((step, idx) => {
+      if (step.screenshotPath) {
+        allScreenshots.push({
+          url: step.screenshotPath,
+          title: `Etapa ${step.stepIndex !== undefined ? step.stepIndex + 1 : idx + 1}: ${step.blockName || step.type}`,
+          subtitle: step.endedAt ? new Date(step.endedAt).toLocaleTimeString('pt-BR') : `Ação ${step.type}`,
+          stepIndex: idx
+        });
+      }
+    });
+  }
+  if (log.screenshotPath && !allScreenshots.some(s => s.url === log.screenshotPath)) {
+    allScreenshots.push({
+      url: log.screenshotPath,
+      title: log.status === 'failure' ? 'Captura no Erro de Execução' : 'Captura Final do Navegador',
+      subtitle: log.endedAt ? new Date(log.endedAt).toLocaleTimeString('pt-BR') : '',
+      stepIndex: -1
+    });
+  }
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1100 }}>
@@ -259,7 +286,7 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
               </div>
             </div>
 
-            {/* Controls in Header: Stop Run & 2-Col Toggle */}
+            {/* Controls in Header: Stop Run & Mode Lock Badge */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {log?.status === 'running' && (
                 <button
@@ -274,16 +301,23 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                 </button>
               )}
 
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setIsTwoColumns(prev => !prev)}
-                title={isTwoColumns ? 'Alternar para visualização clássica (1 coluna)' : 'Alternar para visualização com navegador (2 colunas em tela cheia)'}
-                style={{ fontSize: '12px', gap: '6px' }}
-              >
-                <Columns size={13} color={isTwoColumns ? 'var(--color-primary)' : 'var(--text-muted)'} />
-                <span>{isTwoColumns ? '2 Colunas (Navegador)' : '1 Coluna'}</span>
-              </button>
+              {isHeaded ? (
+                <span
+                  className="badge-headed-locked"
+                  title="Execução em modo Headed: visualização travada em 2 colunas com o navegador"
+                >
+                  <Columns size={13} />
+                  <span>Modo Headed (2 Colunas)</span>
+                </span>
+              ) : (
+                <span
+                  className="badge-headless-locked"
+                  title="Execução em modo Headless: visualização travada exibindo logs e screenshots"
+                >
+                  <FileText size={13} />
+                  <span>Modo Headless (Logs e Screenshots)</span>
+                </span>
+              )}
             </div>
           </div>
 
@@ -566,6 +600,20 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                               )}
                             </div>
                           )}
+                          {/* Step screenshot preview */}
+                          {step.screenshotPath && (
+                            <div
+                              className="step-inline-screenshot"
+                              onClick={() => setSelectedScreenshot(step.screenshotPath)}
+                              title="Clique para ampliar captura da etapa"
+                            >
+                              <img src={step.screenshotPath} alt={`Print da etapa ${step.stepIndex + 1}`} />
+                              <div className="step-inline-screenshot-overlay">
+                                <Maximize2 size={13} />
+                                <span>Ver Captura de Tela</span>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))
@@ -742,10 +790,19 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                 </div>
 
                 <div className="card" style={{ padding: '14px' }}>
-                  <p className="stat-title">Horário de Conclusão</p>
-                  <p style={{ fontSize: '12px', marginTop: '4px', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-                    {log.endedAt ? new Date(log.endedAt).toLocaleString('pt-BR') : 'Ainda em execução'}
-                  </p>
+                  <p className="stat-title">Modo</p>
+                  <span
+                    className="badge"
+                    style={{
+                      fontSize: '11px',
+                      marginTop: '4px',
+                      background: 'rgba(59, 130, 246, 0.15)',
+                      color: '#60a5fa',
+                      border: '1px solid rgba(59, 130, 246, 0.3)'
+                    }}
+                  >
+                    Headless (Segundo Plano)
+                  </span>
                 </div>
               </div>
 
@@ -793,6 +850,38 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                       {isSubmittingPrompt ? <RefreshCw className="spin" size={14} /> : <Play size={14} style={{ fill: 'currentColor' }} />}
                       Concluir Interação & Continuar Pipeline
                     </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Screenshots Gallery Section (Requirement 1.1: Headless displays logs and screenshots) */}
+              {allScreenshots.length > 0 && (
+                <div className="screenshot-gallery-section mb-16">
+                  <h4 style={{ fontSize: '14px', margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-light)' }}>
+                    <Camera size={16} color="var(--color-primary)" />
+                    Capturas de Tela ({allScreenshots.length})
+                  </h4>
+                  <div className="screenshot-gallery-grid">
+                    {allScreenshots.map((sc, i) => (
+                      <div
+                        key={i}
+                        className="screenshot-gallery-card"
+                        onClick={() => setSelectedScreenshot(sc.url)}
+                        title="Clique para ampliar em tela cheia"
+                      >
+                        <div className="screenshot-card-img-wrap">
+                          <img src={sc.url} alt={sc.title} className="screenshot-card-img" />
+                          <div className="screenshot-card-hover-overlay">
+                            <Maximize2 size={16} />
+                            <span>Ampliar</span>
+                          </div>
+                        </div>
+                        <div className="screenshot-card-meta">
+                          <div className="screenshot-card-title">{sc.title}</div>
+                          {sc.subtitle && <div className="screenshot-card-sub">{sc.subtitle}</div>}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -882,6 +971,21 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                             )}
                           </div>
                         )}
+
+                        {step.screenshotPath && (
+                          <div
+                            className="step-inline-screenshot"
+                            onClick={() => setSelectedScreenshot(step.screenshotPath)}
+                            title="Clique para ampliar captura da etapa"
+                            style={{ marginTop: '10px' }}
+                          >
+                            <img src={step.screenshotPath} alt={`Print da etapa ${step.stepIndex + 1}`} />
+                            <div className="step-inline-screenshot-overlay">
+                              <Maximize2 size={13} />
+                              <span>Ver Captura de Tela</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))
@@ -898,6 +1002,46 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
           </button>
         </div>
       </div>
+
+      {/* Lightbox Modal for Fullscreen Screenshots */}
+      {selectedScreenshot && (
+        <div className="screenshot-lightbox-overlay" onClick={() => setSelectedScreenshot(null)}>
+          <div className="screenshot-lightbox-container" onClick={e => e.stopPropagation()}>
+            <div className="screenshot-lightbox-header">
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-light)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Camera size={15} color="var(--color-primary)" />
+                Visualização da Captura de Tela
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <a
+                  href={selectedScreenshot}
+                  download
+                  className="btn btn-secondary btn-sm"
+                  style={{ fontSize: '11px', padding: '4px 8px', gap: '4px', display: 'inline-flex', alignItems: 'center' }}
+                  title="Baixar imagem em resolução original"
+                >
+                  <Download size={13} /> Baixar
+                </a>
+                <button
+                  type="button"
+                  className="btn-icon-subtle"
+                  onClick={() => setSelectedScreenshot(null)}
+                  title="Fechar visualização"
+                >
+                  <XCircle size={20} />
+                </button>
+              </div>
+            </div>
+            <div className="screenshot-lightbox-body">
+              <img
+                src={selectedScreenshot}
+                alt="Captura ampliada"
+                className="screenshot-lightbox-img"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

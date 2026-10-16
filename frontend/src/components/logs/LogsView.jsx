@@ -5,6 +5,7 @@ import {
   RefreshCw,
   Search,
   Eye,
+  EyeOff,
   Clock,
   Play,
   CheckCircle2,
@@ -237,6 +238,41 @@ export default function LogsView({ initialLogId, onClearInitialLogId }) {
                             }}
                           >
                             <Play size={10} /> Manual
+                          </span>
+                        )}
+                        {log.headless === false ? (
+                          <span
+                            className="badge"
+                            style={{
+                              background: 'rgba(16, 185, 129, 0.12)',
+                              color: '#34d399',
+                              border: '1px solid rgba(16, 185, 129, 0.3)',
+                              fontSize: '10px',
+                              padding: '2px 6px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                            title="Execução Headed (Visual / 2 Colunas)"
+                          >
+                            <Eye size={10} /> Headed
+                          </span>
+                        ) : (
+                          <span
+                            className="badge"
+                            style={{
+                              background: 'rgba(100, 116, 139, 0.15)',
+                              color: '#94a3b8',
+                              border: '1px solid rgba(100, 116, 139, 0.3)',
+                              fontSize: '10px',
+                              padding: '2px 6px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                            title="Execução Headless (Logs e Screenshots)"
+                          >
+                            <EyeOff size={10} /> Headless
                           </span>
                         )}
                       </div>

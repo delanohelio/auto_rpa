@@ -54,9 +54,11 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
       .filter(([_, isSkip]) => isSkip)
       .map(([vName]) => vName);
 
+    const isHeadless = browserMode === 'headless';
+
     onStartRun(cleanedOverrides, runTaskVars, cleanedSkipList, {
-      headless: browserMode === 'headless',
-      liveView
+      headless: isHeadless,
+      liveView: !isHeadless
     });
     onClose();
   };
@@ -69,13 +71,13 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
           <h3 className="modal-title">Configurar Execução: {task.name}</h3>
           <XCircle className="modal-close" size={24} onClick={onClose} />
           <p className="text-muted" style={{ fontSize: '13px', margin: '8px 0 0' }}>
-            Defina o modo de navegação, visualização ao vivo e valores de parâmetros para esta rodada.
+            Defina o modo de navegação e os valores de parâmetros para esta rodada.
           </p>
         </div>
 
         {/* Scrollable Body */}
         <div className="modal-body">
-          {/* Browser Mode & Live View Config Card */}
+          {/* Browser Mode Config Card */}
           <div
             style={{
               padding: '14px 16px',
@@ -87,11 +89,11 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
               gap: '12px'
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'gap', gap: '10px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Monitor size={16} color="var(--color-primary)" />
                 <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-light)' }}>
-                  Modo do Navegador
+                  Modo de Execução
                 </span>
               </div>
 
@@ -102,12 +104,13 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
                     alignItems: 'center',
                     gap: '6px',
                     fontSize: '12px',
-                    padding: '5px 10px',
+                    padding: '6px 12px',
                     borderRadius: '6px',
                     background: browserMode === 'headless' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(255, 255, 255, 0.05)',
                     border: browserMode === 'headless' ? '1px solid var(--color-primary)' : '1px solid var(--border-color)',
                     cursor: 'pointer',
-                    color: browserMode === 'headless' ? '#93c5fd' : 'var(--text-muted)'
+                    color: browserMode === 'headless' ? '#93c5fd' : 'var(--text-muted)',
+                    fontWeight: browserMode === 'headless' ? 600 : 400
                   }}
                 >
                   <input
@@ -127,12 +130,13 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
                     alignItems: 'center',
                     gap: '6px',
                     fontSize: '12px',
-                    padding: '5px 10px',
+                    padding: '6px 12px',
                     borderRadius: '6px',
                     background: browserMode === 'headed' ? 'rgba(168, 85, 247, 0.2)' : 'rgba(255, 255, 255, 0.05)',
                     border: browserMode === 'headed' ? '1px solid #a855f7' : '1px solid var(--border-color)',
                     cursor: 'pointer',
-                    color: browserMode === 'headed' ? '#d8b4fe' : 'var(--text-muted)'
+                    color: browserMode === 'headed' ? '#d8b4fe' : 'var(--text-muted)',
+                    fontWeight: browserMode === 'headed' ? 600 : 400
                   }}
                 >
                   <input
@@ -152,29 +156,21 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
               <div style={{ fontSize: '11px', color: '#facc15', background: 'rgba(234, 179, 8, 0.1)', padding: '8px 12px', borderRadius: '6px', border: '1px solid rgba(234, 179, 8, 0.25)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '13px' }}>💡</span>
                 <span>
-                  Esta pipeline contém uma ação de <strong>Interação Manual</strong>. O modo visual (Headed) é recomendado para interação física. Em ambientes de servidor/Docker sem display X11, o AutoRPA utiliza automaticamente Xvfb ou LiveView sem travar a execução.
+                  Esta pipeline contém uma ação de <strong>Interação Manual</strong>. O modo visual (Headed) é recomendado para interação física.
                 </span>
               </div>
             )}
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Eye size={15} color="var(--color-secondary)" />
-                <span style={{ fontSize: '12px', color: 'var(--text-light)' }}>
-                  Acompanhar Navegador ao Vivo (Screencast em Tempo Real)
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.4', paddingTop: '4px', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
+              {browserMode === 'headless' ? (
+                <span>
+                  ⚡ <strong>Modo Headless:</strong> Acompanhamento travado em <strong>1 coluna</strong> exibindo exclusivamente os logs e as capturas de tela (screenshots).
                 </span>
-              </div>
-
-              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', margin: 0 }}>
-                <input
-                  type="checkbox"
-                  checked={liveView}
-                  onChange={e => setLiveView(e.target.checked)}
-                />
-                <span style={{ color: liveView ? 'var(--color-primary)' : 'var(--text-muted)', fontWeight: 600 }}>
-                  {liveView ? 'Ativo' : 'Desativado'}
+              ) : (
+                <span>
+                  🖥️ <strong>Modo Headed:</strong> Acompanhamento travado em <strong>2 colunas</strong> exibindo os logs à esquerda e o navegador em tempo real à direita.
                 </span>
-              </label>
+              )}
             </div>
           </div>
 

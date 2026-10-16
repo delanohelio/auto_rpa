@@ -283,7 +283,7 @@ export async function runTask(
 
   let isLiveView = options.liveView !== undefined
     ? Boolean(options.liveView)
-    : true;
+    : (!isHeadless);
 
   if (hasManualInteraction) {
     console.log(`[Engine] Pipeline "${task.name}" contém ação de Interação Manual (manual_interaction). Solicitando modo Visual (Headed: true).`);
@@ -661,6 +661,7 @@ export async function runTask(
               break;
             }
 
+            case 'screenshot':
             case 'take_screenshot': {
               const filename = `screenshot_${taskId}_${Date.now()}.png`;
               const filePath = path.join(SCREENSHOTS_DIR, filename);
@@ -669,6 +670,7 @@ export async function runTask(
               await page.screenshot({ path: filePath, fullPage: true });
               
               stepLog.screenshotPath = `/screenshots/${filename}`;
+              logRecord.screenshotPath = `/screenshots/${filename}`;
               break;
             }
 
