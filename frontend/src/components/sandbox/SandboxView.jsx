@@ -61,6 +61,7 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
 
   // Test Variables & Secrets State
   const [testParams, setTestParams] = useState({});
+  const [testExecutionVars, setTestExecutionVars] = useState({});
   const [testSecrets, setTestSecrets] = useState({});
   const [revealedSecrets, setRevealedSecrets] = useState({});
   const [showVariablesDrawer, setShowVariablesDrawer] = useState(false);
@@ -456,7 +457,7 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
       newStep.key = 'Enter';
     }
     if (type === 'eval') {
-      newStep.script = '(() => {\n  return document.title;\n})()';
+      newStep.script = '// Escreva apenas o corpo da função (await e return disponíveis)\n// Variáveis em vars.nome\nreturn document.title;';
       newStep.output_file = '';
     }
     if (type === 'list_elements') {
@@ -670,13 +671,18 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
           step,
           parameters: testParams,
           parameterOverrides: testParams,
-          secrets: testSecrets
+          secrets: testSecrets,
+          executionVars: testExecutionVars
         })
       });
 
       const result = await res.json();
       if (!res.ok) {
         throw new Error(result.error || 'Falha ao executar ação');
+      }
+
+      if (result.data?.executionVars) {
+        setTestExecutionVars(result.data.executionVars);
       }
 
       if (typeof index === 'number') {
@@ -1694,9 +1700,9 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
                         {step.type === 'eval' && (
                           <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                              <label style={{ fontSize: '11px', margin: 0 }}>Script JavaScript de Avaliação</label>
+                              <label style={{ fontSize: '11px', margin: 0 }}>Corpo da Função JavaScript (sem wrapper anônimo; variáveis em vars.nome)</label>
                               <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                                O que for retornado será exibido abaixo e no log
+                                Retorno exibido abaixo e no log
                               </span>
                             </div>
                             <CodeEditor
@@ -1704,7 +1710,7 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
                               onChange={code => updateStep(index, 'script', code)}
                               language="javascript"
                               rows={4}
-                              placeholder="(() => {\n  return document.title;\n})()"
+                              placeholder="// Escreva apenas o corpo da função\nreturn document.title;"
                             />
                             <div style={{ marginTop: '6px' }}>
                               <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>

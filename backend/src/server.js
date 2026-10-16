@@ -242,12 +242,52 @@ app.post('/api/tasks/:id/run', async (req, res) => {
     const task = db.getTask(req.params.id);
     if (!task) return res.status(404).json({ error: 'Task not found' });
 
-    const { parameterOverrides = {}, runtimeVars = {}, skipVars = [], headless, liveView = true } = req.body;
-    console.log(`Manual execution requested for Task "${task.name}" with overrides:`, JSON.stringify(parameterOverrides), 'headless:', headless, 'liveView:', liveView);
+    const {
+      parameterOverrides = {},
+      runtimeVars = {},
+      executionVariables = {},
+      skipVars = [],
+      headless,
+      liveView = true
+    } = req.body;
+
+    // Check if task contains manual_interaction or unskipped prompt (Requirement 3)
+    const allBlocks = db.getBlocks(false);
+    const taskBlocks = (task.blocks || []).map(inst => allBlocks.find(b => b.id === inst.blockId)).filter(Boolean);
+
+    const hasManualInteraction = taskBlocks.some(b =>
+      (b.steps || []).some(s =>
+        s.type === 'manual_interaction' || s.type === 'user_interaction' || s.type === 'interacao_manual'
+      )
+    );
+
+    const skipList = Array.isArray(skipVars) ? skipVars : [];
+    const hasUnskippedPrompt = taskBlocks.some(b =>
+      (b.steps || []).some(s => {
+        if (s.type === 'user_prompt') {
+          const vars = s.vars || s.variables || [];
+          if (vars.length === 0) return true;
+          return !vars.every(v => skipList.includes(v.name));
+        }
+        return false;
+      })
+    );
+
+    if (headless === true && (hasManualInteraction || hasUnskippedPrompt)) {
+      const reason = hasManualInteraction
+        ? 'A pipeline possui uma etapa de Interação Manual que exige o modo Headed (Visual).'
+        : 'A pipeline possui um Menu Interativo com variáveis pendentes (sem marcar pular) que exige o modo Headed (Visual).';
+      return res.status(400).json({
+        error: `Execução em modo Headless não permitida: ${reason}`,
+        code: 'HEADLESS_NOT_ALLOWED'
+      });
+    }
+
+    console.log(`Manual execution requested for Task "${task.name}" with overrides:`, JSON.stringify(parameterOverrides), 'execVars:', JSON.stringify(executionVariables), 'headless:', headless, 'liveView:', liveView);
     
     const runId = crypto.randomUUID();
     // Execute asynchronously to avoid blocking the REST API request
-    runTask(task.id, parameterOverrides, runId, runtimeVars, skipVars, 'manual', null, { headless, liveView }).catch(err => {
+    runTask(task.id, parameterOverrides, runId, runtimeVars, skipVars, 'manual', null, { headless, liveView, executionVariables }).catch(err => {
       console.error(`Asynchronous run for task ${task.id} failed:`, err);
     });
 
@@ -765,12 +805,12 @@ app.get('/api/sandbox/stream', (req, res) => {
 // POST /api/sandbox/execute-step - Execute a single step live on the sandbox page
 app.post('/api/sandbox/execute-step', async (req, res) => {
   try {
-    const { step, parameters = {}, parameterOverrides = {}, secrets = {} } = req.body;
+    const { step, parameters = {}, parameterOverrides = {}, secrets = {}, executionVars = {} } = req.body;
     if (!step || !step.type) {
       return res.status(400).json({ error: 'Configuração da etapa (step) é obrigatória.' });
     }
     const finalParams = { ...parameters, ...parameterOverrides };
-    const result = await sandboxManager.executeStep(step, finalParams, secrets);
+    const result = await sandboxManager.executeStep(step, finalParams, secrets, executionVars);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });

@@ -20,6 +20,13 @@ import {
 } from 'lucide-react';
 import CodeEditor from '../code/CodeEditor';
 import CodeViewer from '../code/CodeViewer';
+import {
+  VARIABLE_TYPES,
+  formatBrazilianNow,
+  parseOptionsList,
+  formatOptionsToText
+} from '../../utils/variableTypes';
+import TypedVariableInput from '../common/TypedVariableInput';
 
 export default function BlockEditorModal({ block, onSave, onClose }) {
   const [editingBlock, setEditingBlock] = useState(() => {
@@ -44,12 +51,43 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
 
   // Parameters states
   const [newParamName, setNewParamName] = useState('');
+  const [newParamType, setNewParamType] = useState('text');
+  const [newParamOptions, setNewParamOptions] = useState('');
   const [newParamDefault, setNewParamDefault] = useState('');
   const [newParamDesc, setNewParamDesc] = useState('');
+
   const [editingParamIndex, setEditingParamIndex] = useState(null);
   const [editParamName, setEditParamName] = useState('');
+  const [editParamType, setEditParamType] = useState('text');
+  const [editParamOptions, setEditParamOptions] = useState('');
   const [editParamDefault, setEditParamDefault] = useState('');
   const [editParamDesc, setEditParamDesc] = useState('');
+
+  const handleNewParamTypeChange = (type) => {
+    setNewParamType(type);
+    if (type === 'date' || type === 'datetime') {
+      setNewParamDefault(formatBrazilianNow(type));
+    } else if (type === 'number') {
+      setNewParamDefault(0);
+    } else if (type === 'multiselect') {
+      setNewParamDefault([]);
+    } else {
+      setNewParamDefault('');
+    }
+  };
+
+  const handleEditParamTypeChange = (type) => {
+    setEditParamType(type);
+    if (type === 'date' || type === 'datetime') {
+      setEditParamDefault(formatBrazilianNow(type));
+    } else if (type === 'number') {
+      setEditParamDefault(0);
+    } else if (type === 'multiselect') {
+      setEditParamDefault([]);
+    } else {
+      setEditParamDefault('');
+    }
+  };
 
   // Step operations
   const addStep = (type) => {
@@ -81,7 +119,7 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
       newStep.selector_exists = '';
     }
     if (type === 'eval') {
-      newStep.script = '(() => {\n  return document.title;\n})()';
+      newStep.script = '// Escreva apenas o corpo da função (await e return disponíveis)\n// Altere variáveis globais: vars.contador = (vars.contador || 0) + 1;\nreturn document.title;';
       newStep.output_file = '';
     }
     if (type === 'agent_control') {
@@ -211,14 +249,26 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
     const cleanName = newParamName.trim().replace(/[^a-zA-Z0-9_]/g, '');
     if (!cleanName) return;
 
+    const parsedOptions = (newParamType === 'select' || newParamType === 'multiselect')
+      ? parseOptionsList(newParamOptions)
+      : [];
+
     setEditingBlock(prev => ({
       ...prev,
       parameters: [
         ...(prev.parameters || []),
-        { name: cleanName, defaultValue: newParamDefault, description: newParamDesc }
+        {
+          name: cleanName,
+          type: newParamType || 'text',
+          options: parsedOptions,
+          defaultValue: newParamDefault,
+          description: newParamDesc
+        }
       ]
     }));
     setNewParamName('');
+    setNewParamType('text');
+    setNewParamOptions('');
     setNewParamDefault('');
     setNewParamDesc('');
   };
@@ -228,13 +278,17 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
     if (!param) return;
     setEditingParamIndex(index);
     setEditParamName(param.name || '');
-    setEditParamDefault(param.defaultValue || '');
+    setEditParamType(param.type || 'text');
+    setEditParamOptions(formatOptionsToText(param.options || []));
+    setEditParamDefault(param.defaultValue !== undefined ? param.defaultValue : '');
     setEditParamDesc(param.description || '');
   };
 
   const handleCancelEditParam = () => {
     setEditingParamIndex(null);
     setEditParamName('');
+    setEditParamType('text');
+    setEditParamOptions('');
     setEditParamDefault('');
     setEditParamDesc('');
   };
@@ -243,10 +297,16 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
     const cleanName = editParamName.trim().replace(/[^a-zA-Z0-9_]/g, '');
     if (!cleanName) return;
 
+    const parsedOptions = (editParamType === 'select' || editParamType === 'multiselect')
+      ? parseOptionsList(editParamOptions)
+      : [];
+
     setEditingBlock(prev => {
       const next = [...(prev.parameters || [])];
       next[index] = {
         name: cleanName,
+        type: editParamType || 'text',
+        options: parsedOptions,
         defaultValue: editParamDefault,
         description: editParamDesc
       };
@@ -255,6 +315,8 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
 
     setEditingParamIndex(null);
     setEditParamName('');
+    setEditParamType('text');
+    setEditParamOptions('');
     setEditParamDefault('');
     setEditParamDesc('');
   };
@@ -641,7 +703,7 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                           {step.type === 'eval' && (
                             <div className="step-col-full">
                               <label style={{ fontSize: '11px', display: 'block', marginBottom: '6px' }}>
-                                Script JavaScript a Executar (Retorno avaliado em página e salvo no histórico)
+                                Corpo da Função JavaScript a Executar (Não é necessário função anônima; variáveis de execução em <code style={{ color: 'var(--color-secondary)' }}>vars.nome</code>)
                               </label>
                               <CodeEditor
                                 value={step.script || ''}
@@ -784,40 +846,70 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                 </p>
 
                 {/* Form to add new parameter */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.5fr auto', gap: '10px', alignItems: 'flex-end', background: 'rgba(255, 255, 255, 0.02)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
-                  <div>
-                    <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Novo Parâmetro</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="termo_busca"
-                      value={newParamName}
-                      onChange={e => setNewParamName(e.target.value)}
-                    />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', background: 'rgba(255, 255, 255, 0.02)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 1.5fr 1.5fr auto', gap: '10px', alignItems: 'flex-end' }}>
+                    <div>
+                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Nome da Variável *</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="termo_busca"
+                        value={newParamName}
+                        onChange={e => setNewParamName(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Tipo da Variável</label>
+                      <select
+                        className="form-control"
+                        value={newParamType}
+                        onChange={e => handleNewParamTypeChange(e.target.value)}
+                      >
+                        {VARIABLE_TYPES.map(vt => (
+                          <option key={vt.value} value={vt.value}>{vt.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Valor Padrão</label>
+                      <TypedVariableInput
+                        type={newParamType}
+                        value={newParamDefault}
+                        onChange={setNewParamDefault}
+                        options={newParamOptions}
+                        size="sm"
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Descrição (Opcional)</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Descrição da finalidade"
+                        value={newParamDesc}
+                        onChange={e => setNewParamDesc(e.target.value)}
+                      />
+                    </div>
+                    <button type="button" className="btn btn-secondary" onClick={handleAddParam} style={{ height: '36px' }}>
+                      <Plus size={14} /> Adicionar
+                    </button>
                   </div>
-                  <div>
-                    <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Valor Padrão</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="Tecnologia"
-                      value={newParamDefault}
-                      onChange={e => setNewParamDefault(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Descrição</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="Texto a ser pesquisado"
-                      value={newParamDesc}
-                      onChange={e => setNewParamDesc(e.target.value)}
-                    />
-                  </div>
-                  <button type="button" className="btn btn-secondary" onClick={handleAddParam}>
-                    <Plus size={14} /> Adicionar
-                  </button>
+
+                  {(newParamType === 'select' || newParamType === 'multiselect') && (
+                    <div style={{ marginTop: '4px', borderTop: '1px dashed rgba(255, 255, 255, 0.08)', paddingTop: '8px' }}>
+                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px', color: 'var(--color-primary)' }}>
+                        Opções do {newParamType === 'multiselect' ? 'Multi Seleção' : 'Seletor'} (uma opção por linha)
+                      </label>
+                      <textarea
+                        className="form-control"
+                        rows={3}
+                        style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+                        placeholder={"Opção 1\nOpção 2\nOpção 3"}
+                        value={newParamOptions}
+                        onChange={e => setNewParamOptions(e.target.value)}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Parameters list */}
@@ -846,7 +938,7 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                             <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-secondary)' }}>
                               Editando Parâmetro #{pIdx + 1}
                             </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.5fr auto', gap: '8px', alignItems: 'center' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 1.5fr 1.5fr auto', gap: '8px', alignItems: 'flex-end' }}>
                               <div>
                                 <label style={{ fontSize: '10px', display: 'block', marginBottom: '2px', color: 'var(--text-muted)' }}>Nome</label>
                                 <input
@@ -859,13 +951,25 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                                 />
                               </div>
                               <div>
-                                <label style={{ fontSize: '10px', display: 'block', marginBottom: '2px', color: 'var(--text-muted)' }}>Valor Padrão</label>
-                                <input
-                                  type="text"
+                                <label style={{ fontSize: '10px', display: 'block', marginBottom: '2px', color: 'var(--text-muted)' }}>Tipo</label>
+                                <select
                                   className="form-control"
+                                  value={editParamType}
+                                  onChange={e => handleEditParamTypeChange(e.target.value)}
+                                >
+                                  {VARIABLE_TYPES.map(vt => (
+                                    <option key={vt.value} value={vt.value}>{vt.label}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label style={{ fontSize: '10px', display: 'block', marginBottom: '2px', color: 'var(--text-muted)' }}>Valor Padrão</label>
+                                <TypedVariableInput
+                                  type={editParamType}
                                   value={editParamDefault}
-                                  onChange={e => setEditParamDefault(e.target.value)}
-                                  placeholder="Valor padrão"
+                                  onChange={setEditParamDefault}
+                                  options={editParamOptions}
+                                  size="sm"
                                 />
                               </div>
                               <div>
@@ -878,7 +982,7 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                                   placeholder="Descrição opcional"
                                 />
                               </div>
-                              <div style={{ display: 'flex', gap: '6px', marginTop: '16px' }}>
+                              <div style={{ display: 'flex', gap: '6px' }}>
                                 <button
                                   type="button"
                                   className="btn btn-primary btn-sm"
@@ -897,9 +1001,30 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                                 </button>
                               </div>
                             </div>
+
+                            {(editParamType === 'select' || editParamType === 'multiselect') && (
+                              <div style={{ marginTop: '6px', borderTop: '1px dashed rgba(59, 130, 246, 0.2)', paddingTop: '6px' }}>
+                                <label style={{ fontSize: '10px', display: 'block', marginBottom: '2px', color: 'var(--color-primary)' }}>
+                                  Opções (uma por linha)
+                                </label>
+                                <textarea
+                                  className="form-control"
+                                  rows={3}
+                                  style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+                                  value={editParamOptions}
+                                  onChange={e => setEditParamOptions(e.target.value)}
+                                />
+                              </div>
+                            )}
                           </div>
                         );
                       }
+
+                      const paramType = param.type || 'text';
+                      const typeObj = VARIABLE_TYPES.find(t => t.value === paramType);
+                      const displayDefault = Array.isArray(param.defaultValue)
+                        ? `[${param.defaultValue.join(', ')}]`
+                        : String(param.defaultValue ?? '');
 
                       return (
                         <div
@@ -914,10 +1039,25 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                             borderRadius: 'var(--radius-sm)'
                           }}
                         >
-                          <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <span style={{ fontWeight: 600, color: 'var(--color-secondary)' }}>{'{{param:' + param.name + '}}'}</span>
-                            <span style={{ color: 'var(--text-muted)', marginLeft: '12px', fontSize: '12px' }}>
-                              Padrão: "{param.defaultValue}" {param.description ? `• ${param.description}` : ''}
+                            <span
+                              style={{
+                                fontSize: '11px',
+                                padding: '2px 8px',
+                                borderRadius: '12px',
+                                background: 'rgba(59, 130, 246, 0.15)',
+                                color: '#93c5fd',
+                                border: '1px solid rgba(59, 130, 246, 0.3)',
+                                fontWeight: 600
+                              }}
+                            >
+                              {typeObj?.label || paramType}
+                            </span>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+                              Padrão: "{displayDefault}"
+                              {param.options?.length > 0 && ` • (${param.options.length} opções)`}
+                              {param.description ? ` • ${param.description}` : ''}
                             </span>
                           </div>
                           <div style={{ display: 'flex', gap: '6px' }}>

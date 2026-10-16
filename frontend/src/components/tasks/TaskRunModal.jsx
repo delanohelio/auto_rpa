@@ -1,20 +1,27 @@
-import React, { useState } from 'react';
-import { XCircle, Play, HelpCircle, Monitor, Eye } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { XCircle, Play, HelpCircle, Monitor, Eye, Variable, AlertTriangle } from 'lucide-react';
 import { useData } from '../../context/DataContext';
+import { castVariableValue, getDefaultValueForType } from '../../utils/variableTypes';
+import TypedVariableInput from '../common/TypedVariableInput';
 
 export default function TaskRunModal({ task, onStartRun, onClose }) {
   const { blocks } = useData();
   const [runOverrides, setRunOverrides] = useState({});
 
-  // Check if any block in this pipeline contains manual_interaction (Requirement 1.1)
+  // Check if any block in this pipeline contains manual_interaction (Requirement 3.1)
   const hasManualInteraction = Boolean(task?.blocks?.some(instance => {
     const blkId = instance.blockId || instance;
     const blk = blocks.find(b => b.id === blkId);
     return blk?.steps?.some(s => s.type === 'manual_interaction' || s.type === 'user_interaction' || s.type === 'interacao_manual');
   }));
 
-  const [browserMode, setBrowserMode] = useState(() => hasManualInteraction ? 'headed' : 'headless');
-  const [liveView, setLiveView] = useState(true);
+  // Check if any block has user_prompt steps (Requirement 3.2)
+  const hasPromptSteps = Boolean(task?.blocks?.some(instance => {
+    const blkId = instance.blockId || instance;
+    const blk = blocks.find(b => b.id === blkId);
+    return blk?.steps?.some(s => s.type === 'user_prompt');
+  }));
+
   const [runTaskVars, setRunTaskVars] = useState(() => {
     const promptVars = {};
     if (task && task.blocks) {
@@ -35,6 +42,32 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
   });
   const [runSkipVars, setRunSkipVars] = useState({});
 
+  // Execution variables initial state (Requirement 2)
+  const [runExecutionVars, setRunExecutionVars] = useState(() => {
+    const initial = {};
+    (task?.executionVariables || []).forEach(v => {
+      initial[v.name] = v.defaultValue !== undefined && v.defaultValue !== ''
+        ? v.defaultValue
+        : getDefaultValueForType(v.type || 'text', v.options);
+    });
+    return initial;
+  });
+
+  // Calculate if headless is blocked (Requirements 3.1 & 3.2)
+  const totalPromptVarsCount = Object.keys(runTaskVars).length;
+  const skippedPromptVarsCount = Object.values(runSkipVars).filter(Boolean).length;
+  const hasUnskippedPrompt = hasPromptSteps && (totalPromptVarsCount === 0 || skippedPromptVarsCount < totalPromptVarsCount);
+  const isHeadlessBlocked = hasManualInteraction || hasUnskippedPrompt;
+
+  const [browserMode, setBrowserMode] = useState(() => isHeadlessBlocked ? 'headed' : 'headless');
+
+  // If headless becomes blocked dynamically (e.g. user unchecks a skip checkbox), auto-switch to headed
+  useEffect(() => {
+    if (isHeadlessBlocked && browserMode === 'headless') {
+      setBrowserMode('headed');
+    }
+  }, [isHeadlessBlocked, browserMode]);
+
   const handleConfirm = () => {
     // Clean empty overrides
     const cleanedOverrides = {};
@@ -54,24 +87,32 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
       .filter(([_, isSkip]) => isSkip)
       .map(([vName]) => vName);
 
-    const isHeadless = browserMode === 'headless';
+    // Cast execution variables according to their defined types
+    const finalExecutionVars = {};
+    (task.executionVariables || []).forEach(v => {
+      const rawVal = runExecutionVars[v.name] !== undefined ? runExecutionVars[v.name] : v.defaultValue;
+      finalExecutionVars[v.name] = castVariableValue(rawVal, v.type || 'text');
+    });
+
+    const isHeadless = !isHeadlessBlocked && browserMode === 'headless';
 
     onStartRun(cleanedOverrides, runTaskVars, cleanedSkipList, {
       headless: isHeadless,
-      liveView: !isHeadless
-    });
+      liveView: !isHeadless,
+      executionVariables: finalExecutionVars
+    }, finalExecutionVars);
     onClose();
   };
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1150 }}>
-      <div className="modal-content" style={{ maxWidth: '680px' }} onClick={e => e.stopPropagation()}>
+      <div className="modal-content" style={{ maxWidth: '720px' }} onClick={e => e.stopPropagation()}>
         {/* Fixed Header */}
         <div className="modal-header">
           <h3 className="modal-title">Configurar Execução: {task.name}</h3>
           <XCircle className="modal-close" size={24} onClick={onClose} />
           <p className="text-muted" style={{ fontSize: '13px', margin: '8px 0 0' }}>
-            Defina o modo de navegação e os valores de parâmetros para esta rodada.
+            Defina o modo de navegação e os valores de parâmetros e variáveis para esta rodada.
           </p>
         </div>
 
@@ -89,7 +130,7 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
               gap: '12px'
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'gap', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Monitor size={16} color="var(--color-primary)" />
                 <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-light)' }}>
@@ -108,17 +149,20 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
                     borderRadius: '6px',
                     background: browserMode === 'headless' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(255, 255, 255, 0.05)',
                     border: browserMode === 'headless' ? '1px solid var(--color-primary)' : '1px solid var(--border-color)',
-                    cursor: 'pointer',
+                    cursor: isHeadlessBlocked ? 'not-allowed' : 'pointer',
+                    opacity: isHeadlessBlocked ? 0.45 : 1,
                     color: browserMode === 'headless' ? '#93c5fd' : 'var(--text-muted)',
                     fontWeight: browserMode === 'headless' ? 600 : 400
                   }}
+                  title={isHeadlessBlocked ? 'Modo Headless não permitido para esta pipeline.' : 'Executar em segundo plano'}
                 >
                   <input
                     type="radio"
                     name="browserMode"
                     value="headless"
                     checked={browserMode === 'headless'}
-                    onChange={() => setBrowserMode('headless')}
+                    disabled={isHeadlessBlocked}
+                    onChange={() => !isHeadlessBlocked && setBrowserMode('headless')}
                     style={{ margin: 0 }}
                   />
                   Headless (Segundo Plano)
@@ -152,11 +196,21 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
               </div>
             </div>
 
+            {/* Explanatory alerts for Requirement 3 */}
             {hasManualInteraction && (
               <div style={{ fontSize: '11px', color: '#facc15', background: 'rgba(234, 179, 8, 0.1)', padding: '8px 12px', borderRadius: '6px', border: '1px solid rgba(234, 179, 8, 0.25)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '13px' }}>💡</span>
+                <AlertTriangle size={15} color="#facc15" />
                 <span>
-                  Esta pipeline contém uma ação de <strong>Interação Manual</strong>. O modo visual (Headed) é recomendado para interação física.
+                  Esta pipeline contém uma ação de <strong>Interação Manual</strong>. O modo Headless está desabilitado; a execução deve ser no modo <strong>Headed (Visual)</strong>.
+                </span>
+              </div>
+            )}
+
+            {!hasManualInteraction && hasUnskippedPrompt && (
+              <div style={{ fontSize: '11px', color: '#60a5fa', background: 'rgba(59, 130, 246, 0.1)', padding: '8px 12px', borderRadius: '6px', border: '1px solid rgba(59, 130, 246, 0.25)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertTriangle size={15} color="#60a5fa" />
+                <span>
+                  Esta pipeline possui um <strong>Menu Interativo</strong> pendente de preenchimento. Para permitir o modo Headless, marque <em>"Pular pausa interativa"</em> em todas as variáveis interativas abaixo.
                 </span>
               </div>
             )}
@@ -202,18 +256,14 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
                       <div key={pIdx} style={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr', gap: '12px', alignItems: 'center' }}>
                         <label style={{ fontSize: '12px', margin: 0 }}>
                           <span style={{ fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{param.name}</span>
-                          {param.description && (
-                            <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)' }}>{param.description}</span>
-                          )}
+                          <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)' }}>
+                            Tipo: {param.type || 'text'}{param.description ? ` • ${param.description}` : ''}
+                          </span>
                         </label>
-                        <input
-                          type="text"
-                          className="form-control"
-                          style={{ fontSize: '12px', padding: '6px 10px' }}
-                          placeholder={placeholder}
-                          value={runOverrides[instance.id]?.[param.name] || ''}
-                          onChange={e => {
-                            const val = e.target.value;
+                        <TypedVariableInput
+                          type={param.type || 'text'}
+                          value={runOverrides[instance.id]?.[param.name] ?? ''}
+                          onChange={val => {
                             setRunOverrides(prev => ({
                               ...prev,
                               [instance.id]: {
@@ -222,6 +272,9 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
                               }
                             }));
                           }}
+                          options={param.options}
+                          placeholder={placeholder}
+                          size="sm"
                         />
                       </div>
                     );
@@ -230,6 +283,46 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
               </div>
             );
           })}
+
+          {/* Execution variables initial values (Requirement 2) */}
+          {(task.executionVariables || []).length > 0 && (
+            <div
+              style={{
+                padding: '14px 16px',
+                background: 'rgba(168, 85, 247, 0.04)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid rgba(168, 85, 247, 0.25)'
+              }}
+            >
+              <h4 style={{ fontSize: '13px', color: '#c084fc', fontWeight: 700, marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Variable size={15} /> Variáveis de Execução (Valores Iniciais)
+              </h4>
+              <p className="text-muted" style={{ fontSize: '11px', marginBottom: '12px' }}>
+                Defina ou ajuste os valores iniciais das variáveis globais desta pipeline antes de iniciar a execução.
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {task.executionVariables.map((v, vIdx) => (
+                  <div key={vIdx} style={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr', gap: '12px', alignItems: 'center' }}>
+                    <label style={{ fontSize: '12px', margin: 0 }}>
+                      <span style={{ fontWeight: 600, fontFamily: 'var(--font-mono)', color: '#d8b4fe' }}>vars.{v.name}</span>
+                      <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)' }}>
+                        Tipo: {v.type || 'text'}{v.description ? ` • ${v.description}` : ''}
+                      </span>
+                    </label>
+                    <TypedVariableInput
+                      type={v.type || 'text'}
+                      value={runExecutionVars[v.name]}
+                      onChange={val => setRunExecutionVars(prev => ({ ...prev, [v.name]: val }))}
+                      options={v.options}
+                      placeholder={v.defaultValue !== undefined ? String(v.defaultValue) : ''}
+                      size="sm"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Interactive prompt variables */}
           {Object.keys(runTaskVars).length > 0 && (
@@ -245,7 +338,7 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
                 <HelpCircle size={15} /> Variáveis de Prompt Interativo
               </h4>
               <p className="text-muted" style={{ fontSize: '11px', marginBottom: '12px' }}>
-                Você pode pré-preencher variáveis para evitar que a pipeline pause durante a execução.
+                Você pode pré-preencher variáveis para evitar que a pipeline pause durante a execução. Marcar "Pular" em todas permite executar no modo Headless.
               </p>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>

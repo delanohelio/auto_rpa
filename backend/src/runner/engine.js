@@ -93,15 +93,81 @@ export async function stopTaskRun(runId) {
 
 
 /**
- * Replace secret and parameter references in text
+ * Returns current timestamp in Brazilian standard format
+ * Date: DD/MM/YYYY
+ * Datetime: DD/MM/YYYY HH:mm
  */
-export function resolveText(text, decryptedSecrets = {}, mergedParams = {}) {
+export function formatNowBrazilian(type = 'datetime') {
+  const d = new Date();
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  if (type === 'date') {
+    return `${day}/${month}/${year}`;
+  }
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
+}
+
+/**
+ * Casts raw value into declared RPA variable type
+ */
+export function castVariableValue(val, type = 'text') {
+  if (type === 'number') {
+    if (val === '' || val === null || val === undefined) return 0;
+    const num = Number(val);
+    return isNaN(num) ? 0 : num;
+  }
+  if (type === 'date') {
+    if (!val || val === 'now' || val === 'NOW') {
+      return formatNowBrazilian('date');
+    }
+    return String(val);
+  }
+  if (type === 'datetime') {
+    if (!val || val === 'now' || val === 'NOW') {
+      return formatNowBrazilian('datetime');
+    }
+    return String(val);
+  }
+  if (type === 'multiselect') {
+    if (Array.isArray(val)) return val.map(String);
+    if (typeof val === 'string') {
+      try {
+        const parsed = JSON.parse(val);
+        if (Array.isArray(parsed)) return parsed.map(String);
+      } catch (_) {}
+      if (val.trim()) return val.split('\n').map(s => s.trim()).filter(Boolean);
+    }
+    return [];
+  }
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'object') return JSON.stringify(val);
+  return String(val);
+}
+
+/**
+ * Replace secret, parameter and execution variable references in text
+ */
+export function resolveText(text, decryptedSecrets = {}, mergedParams = {}, executionVars = {}) {
   if (typeof text !== 'string') return text;
   
-  // 1. Resolve {{param:key}} or direct {{key}} from mergedParams & decryptedSecrets
-  let resolved = text.replace(/\{\{(?:param:)?([^}]+)\}\}/g, (match, key) => {
+  // 1. Resolve {{var:key}} or {{executionVar:key}} or {{vars.key}} from executionVars
+  let resolved = text.replace(/\{\{(?:var:|executionVar:|vars\.)([^}]+)\}\}/g, (match, key) => {
+    if (executionVars[key] !== undefined) {
+      return typeof executionVars[key] === 'object' ? JSON.stringify(executionVars[key]) : String(executionVars[key]);
+    }
+    return match;
+  });
+
+  // 2. Resolve {{param:key}} or direct {{key}} from mergedParams, executionVars & decryptedSecrets
+  resolved = resolved.replace(/\{\{(?:param:)?([^}]+)\}\}/g, (match, key) => {
     if (mergedParams[key] !== undefined) {
-      return mergedParams[key];
+      return typeof mergedParams[key] === 'object' ? JSON.stringify(mergedParams[key]) : String(mergedParams[key]);
+    }
+    if (executionVars[key] !== undefined) {
+      return typeof executionVars[key] === 'object' ? JSON.stringify(executionVars[key]) : String(executionVars[key]);
     }
     if (decryptedSecrets[key] !== undefined && decryptedSecrets[key] !== '') {
       return decryptedSecrets[key];
@@ -109,7 +175,7 @@ export function resolveText(text, decryptedSecrets = {}, mergedParams = {}) {
     return match;
   });
 
-  // 2. Resolve explicit {{secret:key}} from decryptedSecrets
+  // 3. Resolve explicit {{secret:key}} from decryptedSecrets
   resolved = resolved.replace(/\{\{secret:([^}]+)\}\}/g, (match, key) => {
     if (decryptedSecrets[key] !== undefined && decryptedSecrets[key] !== '') {
       return decryptedSecrets[key];
@@ -212,6 +278,18 @@ export async function runTask(
   scheduleId = null,
   options = {}
 ) {
+  // Support options object as second argument
+  if (parameterOverrides && typeof parameterOverrides === 'object' && (parameterOverrides.executionVariables !== undefined || parameterOverrides.headless !== undefined || parameterOverrides.options !== undefined)) {
+    const opts = parameterOverrides;
+    parameterOverrides = opts.parameterOverrides || {};
+    runId = (typeof opts.runId === 'string' && opts.runId.trim()) ? opts.runId.trim() : (typeof runId === 'string' ? runId : crypto.randomUUID());
+    runtimeVars = opts.runtimeVars || {};
+    skipVars = opts.skipVars || [];
+    trigger = opts.trigger || 'manual';
+    scheduleId = opts.scheduleId || null;
+    options = opts;
+  }
+
   // Ensure runId is strictly a valid string UUID
   const effectiveRunId = (typeof runId === 'string' && runId.trim()) ? runId.trim() : crypto.randomUUID();
   runId = effectiveRunId;
@@ -270,11 +348,25 @@ export async function runTask(
     });
   }
 
-  // Check if any block contains a manual_interaction step (Requirement 1.1)
+  // 3.1: Check if any block contains a manual_interaction step
   const hasManualInteraction = blocks.some(b =>
     (b.definition.steps || []).some(s =>
       s.type === 'manual_interaction' || s.type === 'user_interaction' || s.type === 'interacao_manual'
     )
+  );
+
+  // 3.2: Check if any block contains an interactive menu (user_prompt) without marking skip
+  const skipList = Array.isArray(skipVars) ? skipVars : [];
+  const hasUnskippedPrompt = blocks.some(b =>
+    (b.definition.steps || []).some(s => {
+      if (s.type === 'user_prompt') {
+        const vars = s.vars || s.variables || [];
+        if (vars.length === 0) return true;
+        const allSkipped = vars.every(v => skipList.includes(v.name));
+        return !allSkipped;
+      }
+      return false;
+    })
   );
 
   let isHeadless = options.headless !== undefined
@@ -286,7 +378,11 @@ export async function runTask(
     : (!isHeadless);
 
   if (hasManualInteraction) {
-    console.log(`[Engine] Pipeline "${task.name}" contém ação de Interação Manual (manual_interaction). Solicitando modo Visual (Headed: true).`);
+    console.log(`[Engine] Pipeline "${task.name}" contém ação de Interação Manual (manual_interaction). Modo Headless NÃO permitido. Forçando Headed: true.`);
+    isHeadless = false;
+    isLiveView = true;
+  } else if (hasUnskippedPrompt) {
+    console.log(`[Engine] Pipeline "${task.name}" contém Menu Interativo (user_prompt) com variáveis pendentes. Modo Headless NÃO permitido. Forçando Headed: true.`);
     isHeadless = false;
     isLiveView = true;
   }
@@ -298,6 +394,22 @@ export async function runTask(
       console.warn(`[Engine] Aviso: Execução em modo Visual (Headed) solicitada para "${task.name}", mas o ambiente não possui XServer ($DISPLAY) nem Xvfb instalado. Alternando automaticamente para modo Headless com LiveView.`);
       isHeadless = true;
       isLiveView = true;
+    }
+  }
+
+  // Initialize Execution Variables (Requirement 2)
+  const executionVars = {};
+  if (Array.isArray(task.executionVariables)) {
+    for (const ev of task.executionVariables) {
+      if (ev && ev.name) {
+        executionVars[ev.name] = castVariableValue(ev.defaultValue, ev.type);
+      }
+    }
+  }
+  if (options.executionVariables && typeof options.executionVariables === 'object') {
+    for (const [k, v] of Object.entries(options.executionVariables)) {
+      const def = (task.executionVariables || []).find(x => x.name === k);
+      executionVars[k] = castVariableValue(v, def?.type || 'text');
     }
   }
 
@@ -318,7 +430,8 @@ export async function runTask(
     stepsExecuted: [],
     screenshotPath: null,
     headless: isHeadless,
-    liveView: isLiveView
+    liveView: isLiveView,
+    executionVars: { ...executionVars }
   };
 
   logRecord.status = 'running';
@@ -434,6 +547,13 @@ export async function runTask(
     activeRunPages.set(runId, page);
     await page.goto('about:blank');
 
+    // Inject execution variables into page context (Requirement 2)
+    await page.addInitScript((initialVars) => {
+      if (!window.executionVars) window.executionVars = {};
+      Object.assign(window.executionVars, initialVars);
+      window.vars = window.executionVars;
+    }, executionVars);
+
     // Attach CDP live screencast stream if requested (identical to Sandbox Studio)
     if (isLiveView && runStream) {
       try {
@@ -497,14 +617,15 @@ export async function runTask(
       if (block.parameters && Array.isArray(block.parameters)) {
         for (const param of block.parameters) {
           if (param.name) {
-            mergedParams[param.name] = param.defaultValue || '';
+            mergedParams[param.name] = castVariableValue(param.defaultValue, param.type);
           }
         }
       }
       if (instance.parameterValues) {
         for (const [key, val] of Object.entries(instance.parameterValues)) {
           if (val !== undefined && val !== '') {
-            mergedParams[key] = val;
+            const def = (block.parameters || []).find(p => p.name === key);
+            mergedParams[key] = castVariableValue(val, def?.type || 'text');
           }
         }
       }
@@ -512,15 +633,15 @@ export async function runTask(
       if (instanceOverrides) {
         for (const [key, val] of Object.entries(instanceOverrides)) {
           if (val !== undefined && val !== '') {
-            mergedParams[key] = val;
+            const def = (block.parameters || []).find(p => p.name === key);
+            mergedParams[key] = castVariableValue(val, def?.type || 'text');
           }
         }
       }
       if (runtimeVars && typeof runtimeVars === 'object') {
         for (const [key, val] of Object.entries(runtimeVars)) {
-          if (val !== undefined && val !== '') {
-            mergedParams[key] = val;
-          }
+          const def = (block.parameters || []).find(p => p.name === key);
+          mergedParams[key] = castVariableValue(val, def?.type || 'text');
         }
       }
 
@@ -563,7 +684,7 @@ export async function runTask(
           // Process individual steps
           switch (step.type) {
             case 'navigate': {
-              const url = resolveText(step.url, decryptedSecrets, mergedParams);
+              const url = resolveText(step.url, decryptedSecrets, mergedParams, executionVars);
               if (!url) throw new Error('Navigate command requires a URL parameter');
               console.log(`Navigating to: ${url}`);
               await page.goto(url, { waitUntil: 'load', timeout: 30000 });
@@ -571,7 +692,7 @@ export async function runTask(
             }
 
             case 'click': {
-              const selector = resolveText(step.selector, decryptedSecrets, mergedParams);
+              const selector = resolveText(step.selector, decryptedSecrets, mergedParams, executionVars);
               if (!selector) throw new Error('Click command requires a selector');
               const pwSelector = getPlaywrightSelector(selector, step.selector_type);
               console.log(`Clicking element: ${pwSelector}`);
@@ -583,8 +704,8 @@ export async function runTask(
             }
 
             case 'type': {
-              const selector = resolveText(step.selector, decryptedSecrets, mergedParams);
-              const text = resolveText(step.text, decryptedSecrets, mergedParams);
+              const selector = resolveText(step.selector, decryptedSecrets, mergedParams, executionVars);
+              const text = resolveText(step.text, decryptedSecrets, mergedParams, executionVars);
               if (!selector) throw new Error('Type command requires a selector');
               
               console.log(`Typing into: ${selector}`);
@@ -612,7 +733,7 @@ export async function runTask(
                 console.log(`Waiting for load state (timeout: ${timeoutSec}s)...`);
                 await page.waitForLoadState('load', { timeout: timeoutMs });
               } else if (condition === 'visible') {
-                const selector = resolveText(step.selector, decryptedSecrets, mergedParams);
+                const selector = resolveText(step.selector, decryptedSecrets, mergedParams, executionVars);
                 if (!selector) throw new Error('Wait visible command requires a selector');
                 const pwSelector = getPlaywrightSelector(selector, step.selector_type);
                 console.log(`Waiting for element visibility: ${pwSelector} (timeout: ${timeoutSec}s)`);
@@ -637,7 +758,7 @@ export async function runTask(
             }
 
             case 'list_elements': {
-              const query = resolveText(step.query_selector, decryptedSecrets, mergedParams);
+              const query = resolveText(step.query_selector, decryptedSecrets, mergedParams, executionVars);
               if (!query) throw new Error('ListElements command requires a query selector');
               console.log(`Listing elements for query: ${query}`);
               
@@ -675,18 +796,59 @@ export async function runTask(
             }
 
             case 'eval': {
-              const script = resolveText(step.script, decryptedSecrets, mergedParams);
+              const script = resolveText(step.script, decryptedSecrets, mergedParams, executionVars);
               if (!script) throw new Error("O script da etapa 'eval' não foi fornecido.");
-              console.log(`Evaluating script: ${script.substring(0, 60)}...`);
-              const output = await page.evaluate(script);
+              console.log(`Evaluating script (body-only supported): ${script.substring(0, 60)}...`);
+
+              // Evaluate user script in page context with vars, executionVars, params, secrets, setVar, getVar
+              const evalRes = await page.evaluate(async ({ script, executionVars, params, secrets }) => {
+                if (!window.executionVars) window.executionVars = {};
+                Object.assign(window.executionVars, executionVars);
+                window.vars = window.executionVars;
+
+                const setVar = (name, val) => { window.executionVars[name] = val; };
+                const getVar = (name) => window.executionVars[name];
+                const vars = window.executionVars;
+
+                let body = script.trim();
+                // Support legacy IIFE e.g. (() => { ... })()
+                if (body.startsWith('(() =>') || body.startsWith('(function')) {
+                  body = 'return ' + body;
+                } else if (!body.includes('return') && !body.includes(';') && !body.includes('\n')) {
+                  body = 'return ' + body;
+                }
+
+                const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+                const fn = new AsyncFunction('vars', 'executionVars', 'params', 'secrets', 'setVar', 'getVar', body);
+                const userResult = await fn(vars, vars, params, secrets, setVar, getVar);
+
+                return {
+                  userResult: userResult !== undefined ? userResult : null,
+                  updatedExecutionVars: { ...window.executionVars }
+                };
+              }, {
+                script,
+                executionVars,
+                params: mergedParams,
+                secrets: decryptedSecrets
+              });
+
+              const output = evalRes.userResult;
+              if (evalRes.updatedExecutionVars) {
+                Object.assign(executionVars, evalRes.updatedExecutionVars);
+                logRecord.executionVars = { ...executionVars };
+                db.addLog(logRecord);
+              }
 
               console.log(`[JSEval] Return value:`, typeof output === 'object' ? JSON.stringify(output) : output);
+              console.log(`[JSEval] Current executionVars:`, executionVars);
 
               // Step data with explicit return value
               stepLog.data = {
                 result: output !== undefined ? output : null,
                 returnValue: output !== undefined ? output : null,
                 hasOutput: output !== undefined,
+                executionVars: { ...executionVars },
                 message: output !== undefined
                   ? (typeof output === 'object' && output !== null
                       ? `Retorno capturado (${Array.isArray(output) ? `${output.length} itens` : 'Objeto'}).`
@@ -697,7 +859,7 @@ export async function runTask(
               // If output_file is configured, persist the return value to disk and download area
               const rawOutputFile = (step.output_file || '').trim();
               if (rawOutputFile) {
-                const resolvedFilename = resolveText(rawOutputFile, decryptedSecrets, mergedParams).trim();
+                const resolvedFilename = resolveText(rawOutputFile, decryptedSecrets, mergedParams, executionVars).trim();
                 if (resolvedFilename) {
                   const safeFilename = path.basename(resolvedFilename);
                   const uniqueFilename = `download_${runId}_${safeFilename}`;
@@ -744,7 +906,7 @@ export async function runTask(
             }
 
             case 'conditional_if': {
-              const selector = resolveText(step.selector_exists, decryptedSecrets, mergedParams);
+              const selector = resolveText(step.selector_exists, decryptedSecrets, mergedParams, executionVars);
               if (!selector) throw new Error('ConditionalIf command requires a selector_exists parameter');
               const pwSelector = getPlaywrightSelector(selector, step.selector_type);
               console.log(`Evaluating if selector exists: ${pwSelector}`);
@@ -833,7 +995,7 @@ export async function runTask(
               let dynamicData = null;
               if (step.dynamic_script) {
                 try {
-                  const resolvedScript = resolveText(step.dynamic_script, decryptedSecrets, mergedParams);
+                  const resolvedScript = resolveText(step.dynamic_script, decryptedSecrets, mergedParams, executionVars);
                   if (resolvedScript) {
                     console.log('Evaluating dynamic_script for user_prompt in page context...');
                     dynamicData = await page.evaluate(resolvedScript);
@@ -917,7 +1079,8 @@ export async function runTask(
               const instruction = resolveText(
                 step.instruction || step.message || 'Por favor, realize as ações necessárias com mouse e teclado na janela do navegador e depois clique em Continuar.',
                 decryptedSecrets,
-                mergedParams
+                mergedParams,
+                executionVars
               );
 
               console.log(`[Engine] Pipeline em pausa para Interação Manual: "${instruction}". Aguardando usuário no navegador (timeout: ${timeoutSec}s)...`);

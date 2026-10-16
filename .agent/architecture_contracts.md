@@ -81,3 +81,39 @@ interface PaginatedLogsResponse {
 
 ### GET `/api/logs/:id`
 Deep execution report containing complete steps execution trace and extracted data.
+
+## 3. Database Models & Persistence Engine (SQLite WAL)
+
+Engine: `better-sqlite3` embedded with `PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;`.
+File: `backend/data/database.sqlite`.
+
+### Table Schemas
+- `blocks`: `id TEXT PRIMARY KEY, name TEXT, description TEXT, category TEXT, steps TEXT, parameters TEXT, secrets TEXT, updated_at TEXT`
+- `tasks`: `id TEXT PRIMARY KEY, name TEXT, description TEXT, blocks TEXT, execution_variables TEXT, anti_detection INTEGER, updated_at TEXT`
+- `schedules`: `id TEXT PRIMARY KEY, task_id TEXT, cron_expression TEXT, enabled INTEGER, last_run TEXT, next_run TEXT, updated_at TEXT`
+- `logs`: `id TEXT PRIMARY KEY, task_id TEXT, task_name TEXT, trigger TEXT, schedule_id TEXT, status TEXT, started_at TEXT, ended_at TEXT, duration REAL, current_block_id TEXT, current_block_name TEXT, current_step_index INTEGER, error TEXT, steps_executed TEXT, screenshot_path TEXT, headless INTEGER, live_view INTEGER, execution_vars TEXT, created_at TEXT`
+- `settings`: `key TEXT PRIMARY KEY, value TEXT`
+
+## 4. Variable Types & Execution Variables Contract
+
+```typescript
+type VariableType = 'text' | 'number' | 'date' | 'datetime' | 'select' | 'multiselect';
+
+interface VariableDefinition {
+  name: string;
+  type: VariableType; // Default 'text'
+  defaultValue: any; // 'now' for date/datetime defaults to current Brazilian timestamp
+  description?: string;
+  options?: string[]; // Defined via line-separated textarea for select and multiselect
+}
+```
+
+### JS Eval Execution Contract
+User writes only the body of the function. The engine wraps and evaluates with:
+```javascript
+(async ({ vars, executionVars, params, secrets, setVar, getVar }) => {
+  // USER BODY
+})
+```
+Updates made to `vars` or `executionVars` are automatically reflected back into the pipeline's execution state.
+

@@ -27,6 +27,7 @@ class SandboxManager {
     this.headless = true;
     this.isLaunching = false;
     this.activeSessionId = null;
+    this.executionVars = {};
   }
 
   /**
@@ -235,10 +236,23 @@ class SandboxManager {
   /**
    * Executes a single action step against the live browser
    */
-  async executeStep(step, parameters = {}, secrets = {}) {
+  async executeStep(step, parameters = {}, secrets = {}, executionVars = {}) {
     if (!this.page || this.page.isClosed()) {
       await this.initSession({ headless: this.headless });
     }
+
+    if (executionVars && typeof executionVars === 'object') {
+      this.executionVars = { ...this.executionVars, ...executionVars };
+    }
+
+    // Inject execution variables into page context
+    try {
+      await this.page.evaluate((vars) => {
+        if (!window.executionVars) window.executionVars = { ...vars };
+        if (!window.vars) window.vars = window.executionVars;
+        Object.assign(window.executionVars, vars);
+      }, this.executionVars);
+    } catch (_) {}
 
     // Resolve secrets: use test secrets provided by user in Sandbox;
     // if a secret is blank or masked and step belongs to a block, fallback to DB vault
@@ -283,7 +297,7 @@ class SandboxManager {
       switch (actionType) {
         case 'navigate': {
           const rawUrl = step.url || '';
-          const url = resolveText(rawUrl, resolvedSecrets, parameters);
+          const url = resolveText(rawUrl, resolvedSecrets, parameters, this.executionVars);
           if (!url) throw new Error('A ação Navegar requer uma URL válida.');
           console.log(`[Sandbox] Navigating to: ${url}`);
           await this.page.goto(url, { waitUntil: 'load', timeout: 30000 });
@@ -292,7 +306,7 @@ class SandboxManager {
         }
 
         case 'click': {
-          const selector = resolveText(step.selector, resolvedSecrets, parameters);
+          const selector = resolveText(step.selector, resolvedSecrets, parameters, this.executionVars);
           if (!selector) throw new Error('A ação Clicar requer um seletor.');
           const pwSelector = getPlaywrightSelector(selector, step.selector_type);
           console.log(`[Sandbox] Clicking: ${pwSelector}`);
@@ -308,11 +322,11 @@ class SandboxManager {
         }
 
         case 'type': {
-          const selector = resolveText(step.selector, resolvedSecrets, parameters);
+          const selector = resolveText(step.selector, resolvedSecrets, parameters, this.executionVars);
           if (!selector) throw new Error('A ação Digitar requer um seletor.');
           const pwSelector = getPlaywrightSelector(selector, step.selector_type);
           const rawText = step.text || '';
-          const textToType = resolveText(rawText, resolvedSecrets, parameters);
+          const textToType = resolveText(rawText, resolvedSecrets, parameters, this.executionVars);
           console.log(`[Sandbox] Typing in ${pwSelector}: ${rawText.includes('{{secret') ? '********' : textToType}`);
           const locator = this.page.locator(pwSelector).first();
           await locator.waitFor({ state: 'visible', timeout: 15000 });
@@ -322,10 +336,10 @@ class SandboxManager {
         }
 
         case 'select': {
-          const selector = resolveText(step.selector, resolvedSecrets, parameters);
+          const selector = resolveText(step.selector, resolvedSecrets, parameters, this.executionVars);
           if (!selector) throw new Error('A ação Selecionar requer um seletor.');
           const pwSelector = getPlaywrightSelector(selector, step.selector_type);
-          const val = resolveText(step.value || '', resolvedSecrets, parameters);
+          const val = resolveText(step.value || '', resolvedSecrets, parameters, this.executionVars);
           console.log(`[Sandbox] Selecting in ${pwSelector}: ${val}`);
           const locator = this.page.locator(pwSelector).first();
           await locator.waitFor({ state: 'visible', timeout: 15000 });
@@ -344,7 +358,7 @@ class SandboxManager {
           } else if (condition === 'networkidle') {
             await this.page.waitForLoadState('networkidle', { timeout });
           } else if (condition === 'visible') {
-            const selector = resolveText(step.selector, resolvedSecrets, parameters);
+            const selector = resolveText(step.selector, resolvedSecrets, parameters, this.executionVars);
             if (!selector) throw new Error('A espera por elemento visível requer um seletor.');
             const pwSelector = getPlaywrightSelector(selector, step.selector_type);
             await this.page.locator(pwSelector).first().waitFor({ state: 'visible', timeout });
@@ -354,7 +368,7 @@ class SandboxManager {
         }
 
         case 'keypress': {
-          const key = resolveText(step.key || 'Enter', resolvedSecrets, parameters);
+          const key = resolveText(step.key || 'Enter', resolvedSecrets, parameters, this.executionVars);
           console.log(`[Sandbox] Keypress: ${key}`);
           await this.page.keyboard.press(key);
           resultLog.data = { message: `Tecla pressionada: ${key}` };
@@ -369,7 +383,7 @@ class SandboxManager {
         }
 
         case 'list_elements': {
-          const query = resolveText(step.query_selector, resolvedSecrets, parameters);
+          const query = resolveText(step.query_selector, resolvedSecrets, parameters, this.executionVars);
           if (!query) throw new Error('A ação Listar Elementos requer um query_selector.');
           const pwSelector = getPlaywrightSelector(query, step.selector_type || 'css');
           console.log(`[Sandbox] Listing elements: ${pwSelector}`);
@@ -388,7 +402,7 @@ class SandboxManager {
         }
 
         case 'conditional_if': {
-          const selector = resolveText(step.selector_exists, resolvedSecrets, parameters);
+          const selector = resolveText(step.selector_exists, resolvedSecrets, parameters, this.executionVars);
           if (!selector) throw new Error('A condição requer um seletor.');
           const pwSelector = getPlaywrightSelector(selector, step.selector_type);
           const exists = (await this.page.locator(pwSelector).count()) > 0;
@@ -397,15 +411,52 @@ class SandboxManager {
         }
 
         case 'eval': {
-          const script = resolveText(step.script, resolvedSecrets, parameters);
+          const script = resolveText(step.script, resolvedSecrets, parameters, this.executionVars);
           if (!script) throw new Error("O script da etapa 'eval' não foi fornecido.");
           console.log(`[Sandbox] Evaluating script: ${script.substring(0, 60)}...`);
-          const output = await this.page.evaluate(script);
+
+          const evalResult = await this.page.evaluate(async ({ scriptBody, initialExecutionVars, params, secrets }) => {
+            if (!window.executionVars) window.executionVars = { ...initialExecutionVars };
+            if (!window.vars) window.vars = window.executionVars;
+            Object.assign(window.executionVars, initialExecutionVars);
+
+            const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+            let fn;
+            try {
+              fn = new AsyncFunction('vars', 'executionVars', 'params', 'secrets', 'setVar', 'getVar', scriptBody);
+            } catch (compileErr) {
+              fn = new AsyncFunction('vars', 'executionVars', 'params', 'secrets', 'setVar', 'getVar', `return (${scriptBody});`);
+            }
+
+            const setVar = (key, val) => {
+              window.executionVars[key] = val;
+              window.vars[key] = val;
+            };
+            const getVar = (key) => window.executionVars[key];
+
+            const result = await fn(window.vars, window.executionVars, params, secrets, setVar, getVar);
+            return {
+              result,
+              updatedExecutionVars: { ...window.executionVars }
+            };
+          }, {
+            scriptBody: script,
+            initialExecutionVars: this.executionVars,
+            params: parameters,
+            secrets: resolvedSecrets
+          });
+
+          if (evalResult && evalResult.updatedExecutionVars) {
+            Object.assign(this.executionVars, evalResult.updatedExecutionVars);
+          }
+
+          const output = evalResult ? evalResult.result : undefined;
 
           resultLog.data = {
             result: output !== undefined ? output : null,
             returnValue: output !== undefined ? output : null,
             hasOutput: output !== undefined,
+            executionVars: { ...this.executionVars },
             message: output !== undefined
               ? (typeof output === 'object' && output !== null
                   ? `Retorno: ${Array.isArray(output) ? `Array [${output.length}]` : 'Objeto'}`
@@ -416,7 +467,7 @@ class SandboxManager {
           // If output_file is configured, also save to disk
           const rawOutputFile = (step.output_file || '').trim();
           if (rawOutputFile) {
-            const resolvedFilename = resolveText(rawOutputFile, resolvedSecrets, parameters).trim();
+            const resolvedFilename = resolveText(rawOutputFile, resolvedSecrets, parameters, this.executionVars).trim();
             if (resolvedFilename) {
               const safeFilename = path.basename(resolvedFilename);
               const uniqueFilename = `sandbox_${safeFilename}`;
@@ -454,7 +505,8 @@ class SandboxManager {
           const instruction = resolveText(
             step.instruction || step.message || 'Por favor, realize as ações necessárias com o mouse e teclado no navegador e depois continue.',
             resolvedSecrets,
-            parameters
+            parameters,
+            this.executionVars
           );
           resultLog.data = {
             isManualInteraction: true,
@@ -525,6 +577,7 @@ class SandboxManager {
           try { client(initialScreenshot); } catch (_) {}
         }
       }
+      this.executionVars = {};
 
       return {
         ready: true,
@@ -638,6 +691,7 @@ class SandboxManager {
     }
     this.page = null;
     this.lastFrame = null;
+    this.executionVars = {};
   }
 }
 

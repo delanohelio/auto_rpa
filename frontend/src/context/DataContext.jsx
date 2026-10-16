@@ -42,12 +42,33 @@ export function DataProvider({ children }) {
     }
   }, [apiFetch]);
 
+  const normalizeBlockData = (block) => {
+    if (!block) return block;
+    const parameters = (block.parameters || []).map(p => ({
+      ...p,
+      type: p.type || 'text',
+      options: p.options || []
+    }));
+    return { ...block, parameters };
+  };
+
+  const normalizeTaskData = (task) => {
+    if (!task) return task;
+    const executionVariables = (task.executionVariables || []).map(v => ({
+      ...v,
+      type: v.type || 'text',
+      options: v.options || []
+    }));
+    return { ...task, executionVariables };
+  };
+
   const fetchBlocks = useCallback(async () => {
     try {
       const res = await apiFetch('/api/blocks');
       if (res.ok) {
         const data = await res.json();
-        setBlocks(data);
+        const normalized = Array.isArray(data) ? data.map(normalizeBlockData) : [];
+        setBlocks(normalized);
       }
     } catch (e) {
       console.error('Failed to fetch blocks:', e);
@@ -59,7 +80,8 @@ export function DataProvider({ children }) {
       const res = await apiFetch('/api/tasks');
       if (res.ok) {
         const data = await res.json();
-        setTasks(data);
+        const normalized = Array.isArray(data) ? data.map(normalizeTaskData) : [];
+        setTasks(normalized);
       }
     } catch (e) {
       console.error('Failed to fetch tasks:', e);
@@ -259,14 +281,16 @@ export function DataProvider({ children }) {
     }
   };
 
-  const triggerTaskRun = async (taskId, parameterOverrides = {}, runtimeVars = {}, skipVars = [], options = {}) => {
+  const triggerTaskRun = async (taskId, parameterOverrides = {}, runtimeVars = {}, skipVars = [], options = {}, executionVariables = {}) => {
     try {
+      const finalExecutionVars = options.executionVariables || executionVariables || {};
       const res = await apiFetch(`/api/tasks/${taskId}/run`, {
         method: 'POST',
         body: JSON.stringify({
           parameterOverrides,
           runtimeVars,
           skipVars,
+          executionVariables: finalExecutionVars,
           headless: options.headless,
           liveView: options.liveView
         })
@@ -286,14 +310,16 @@ export function DataProvider({ children }) {
     }
   };
 
-  const triggerScheduleRun = async (scheduleId, parameterOverrides = {}, runtimeVars = {}, skipVars = [], options = {}) => {
+  const triggerScheduleRun = async (scheduleId, parameterOverrides = {}, runtimeVars = {}, skipVars = [], options = {}, executionVariables = {}) => {
     try {
+      const finalExecutionVars = options.executionVariables || executionVariables || {};
       const res = await apiFetch(`/api/schedules/${scheduleId}/run`, {
         method: 'POST',
         body: JSON.stringify({
           parameterOverrides,
           runtimeVars,
           skipVars,
+          executionVariables: finalExecutionVars,
           headless: options.headless,
           liveView: options.liveView
         })

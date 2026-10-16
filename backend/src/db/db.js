@@ -1,59 +1,116 @@
+import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { encrypt } from '../utils/crypto.js';
-
 import { fileURLToPath } from 'url';
+import { encrypt } from '../utils/crypto.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DATA_DIR = path.resolve(__dirname, '../../data');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
+const SQLITE_FILE = path.join(DATA_DIR, 'database.sqlite');
+const LEGACY_JSON_FILE = path.join(DATA_DIR, 'db.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// Ensure database file exists with initial structure
-if (!fs.existsSync(DB_FILE)) {
-  fs.writeFileSync(DB_FILE, JSON.stringify({
-    blocks: [],
-    tasks: [],
-    schedules: [],
-    logs: []
-  }, null, 2), 'utf8');
-}
+// Initialize SQLite with WAL mode & foreign keys
+const sqlite = new Database(SQLITE_FILE);
+sqlite.pragma('journal_mode = WAL');
+sqlite.pragma('busy_timeout = 5000');
+sqlite.pragma('foreign_keys = ON');
+
+// Initialize Database Schema
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS blocks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    category TEXT,
+    steps TEXT NOT NULL,
+    parameters TEXT NOT NULL,
+    secrets TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    blocks TEXT NOT NULL,
+    execution_variables TEXT,
+    anti_detection INTEGER DEFAULT 0,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS schedules (
+    id TEXT PRIMARY KEY,
+    task_id TEXT,
+    cron_expression TEXT DEFAULT '* * * * *',
+    enabled INTEGER DEFAULT 1,
+    last_run TEXT,
+    next_run TEXT,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS logs (
+    id TEXT PRIMARY KEY,
+    task_id TEXT,
+    task_name TEXT,
+    trigger TEXT,
+    schedule_id TEXT,
+    status TEXT,
+    started_at TEXT,
+    ended_at TEXT,
+    duration REAL,
+    current_block_id TEXT,
+    current_block_name TEXT,
+    current_step_index INTEGER,
+    error TEXT,
+    steps_executed TEXT,
+    screenshot_path TEXT,
+    headless INTEGER,
+    live_view INTEGER,
+    execution_vars TEXT,
+    created_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+`);
 
 /**
- * Reads the database file.
- * Uses a try-catch fallback.
+ * Normalizes any parameter or variable definition according to RPA specifications:
+ * Types: 'text' (default), 'number', 'date', 'datetime', 'select', 'multiselect'.
+ * Date & Datetime default to 'now'.
+ * Select & Multiselect have an array of options.
  */
-function readDB() {
-  try {
-    const content = fs.readFileSync(DB_FILE, 'utf8');
-    return JSON.parse(content);
-  } catch (error) {
-    console.error('Error reading DB file, returning empty state:', error);
-    return { blocks: [], tasks: [], schedules: [], logs: [] };
+export function normalizeParameter(p) {
+  if (!p || typeof p !== 'object') {
+    return { name: '', type: 'text', defaultValue: '', description: '', options: [] };
   }
-}
-
-/**
- * Writes the database file atomically to prevent corruption.
- */
-function writeDB(data) {
-  const tempFile = `${DB_FILE}.tmp`;
-  try {
-    fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), 'utf8');
-    fs.renameSync(tempFile, DB_FILE);
-  } catch (error) {
-    console.error('Atomic DB write failed:', error);
-    if (fs.existsSync(tempFile)) {
-      try { fs.unlinkSync(tempFile); } catch (_) {}
-    }
-    throw error;
+  const type = p.type || 'text';
+  let defaultValue = p.defaultValue;
+  if ((type === 'date' || type === 'datetime') && (defaultValue === undefined || defaultValue === null || defaultValue === '')) {
+    defaultValue = 'now';
   }
+  let options = [];
+  if (Array.isArray(p.options)) {
+    options = p.options;
+  } else if (typeof p.options === 'string') {
+    options = p.options.split('\n').map(s => s.trim()).filter(Boolean);
+  }
+  return {
+    name: p.name || '',
+    type,
+    defaultValue: defaultValue !== undefined ? defaultValue : '',
+    description: p.description || '',
+    options
+  };
 }
 
 // --- Masking Helpers ---
@@ -65,119 +122,302 @@ function maskSecrets(secrets = {}) {
   return masked;
 }
 
-// --- Blocks CRUD ---
+// --- Automatic Migration from legacy db.json if database is freshly created ---
+(function autoMigrateFromLegacyJson() {
+  try {
+    const blockCount = sqlite.prepare('SELECT count(*) as count FROM blocks').get().count;
+    if (blockCount === 0 && fs.existsSync(LEGACY_JSON_FILE)) {
+      console.log('[SQLite DB] Migrando dados do arquivo legado db.json para SQLite...');
+      const raw = fs.readFileSync(LEGACY_JSON_FILE, 'utf8');
+      const data = JSON.parse(raw);
+
+      const insertBlock = sqlite.prepare(`
+        INSERT OR REPLACE INTO blocks (id, name, description, category, steps, parameters, secrets, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const insertTask = sqlite.prepare(`
+        INSERT OR REPLACE INTO tasks (id, name, description, blocks, execution_variables, anti_detection, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      const insertSchedule = sqlite.prepare(`
+        INSERT OR REPLACE INTO schedules (id, task_id, cron_expression, enabled, last_run, next_run, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      const insertLog = sqlite.prepare(`
+        INSERT OR REPLACE INTO logs (id, task_id, task_name, trigger, schedule_id, status, started_at, ended_at, duration, current_block_id, current_block_name, current_step_index, error, steps_executed, screenshot_path, headless, live_view, execution_vars, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const insertSetting = sqlite.prepare(`
+        INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)
+      `);
+
+      const migrationTx = sqlite.transaction(() => {
+        // Blocks
+        for (const b of data.blocks || []) {
+          const params = (b.parameters || []).map(normalizeParameter);
+          insertBlock.run(
+            b.id || crypto.randomUUID(),
+            b.name || 'Untitled Block',
+            b.description || '',
+            b.category || 'general',
+            JSON.stringify(b.steps || []),
+            JSON.stringify(params),
+            JSON.stringify(b.secrets || {}),
+            b.updatedAt || new Date().toISOString()
+          );
+        }
+
+        // Tasks
+        for (const t of data.tasks || []) {
+          const execVars = (t.executionVariables || []).map(normalizeParameter);
+          insertTask.run(
+            t.id || crypto.randomUUID(),
+            t.name || 'Untitled Task',
+            t.description || '',
+            JSON.stringify(t.blocks || []),
+            JSON.stringify(execVars),
+            t.antiDetection ? 1 : 0,
+            t.updatedAt || new Date().toISOString()
+          );
+        }
+
+        // Schedules
+        for (const s of data.schedules || []) {
+          insertSchedule.run(
+            s.id || crypto.randomUUID(),
+            s.taskId || '',
+            s.cronExpression || '* * * * *',
+            s.enabled ? 1 : 0,
+            s.lastRun || null,
+            s.nextRun || null,
+            s.updatedAt || new Date().toISOString()
+          );
+        }
+
+        // Logs
+        for (const l of data.logs || []) {
+          insertLog.run(
+            typeof l.id === 'string' ? l.id : crypto.randomUUID(),
+            typeof l.taskId === 'string' ? l.taskId : null,
+            typeof l.taskName === 'string' ? l.taskName : null,
+            typeof l.trigger === 'string' ? l.trigger : 'manual',
+            typeof l.scheduleId === 'string' ? l.scheduleId : null,
+            typeof l.status === 'string' ? l.status : 'success',
+            typeof l.startedAt === 'string' ? l.startedAt : (typeof l.createdAt === 'string' ? l.createdAt : new Date().toISOString()),
+            typeof l.endedAt === 'string' ? l.endedAt : null,
+            typeof l.duration === 'number' ? l.duration : (l.duration !== undefined && l.duration !== null ? Number(l.duration) : null),
+            typeof l.currentBlockId === 'string' ? l.currentBlockId : null,
+            typeof l.currentBlockName === 'string' ? l.currentBlockName : null,
+            typeof l.currentStepIndex === 'number' ? l.currentStepIndex : -1,
+            typeof l.error === 'string' ? l.error : (l.error ? JSON.stringify(l.error) : null),
+            JSON.stringify(l.stepsExecuted || []),
+            typeof l.screenshotPath === 'string' ? l.screenshotPath : null,
+            l.headless === false ? 0 : 1,
+            l.liveView ? 1 : 0,
+            JSON.stringify(l.executionVars || {}),
+            typeof l.createdAt === 'string' ? l.createdAt : new Date().toISOString()
+          );
+        }
+
+        // Settings
+        if (data.settings) {
+          for (const [k, v] of Object.entries(data.settings)) {
+            insertSetting.run(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+          }
+        }
+      });
+
+      migrationTx();
+      console.log(`[SQLite DB] Migração concluída com sucesso: ${(data.blocks || []).length} blocos, ${(data.tasks || []).length} pipelines, ${(data.schedules || []).length} agendamentos e ${(data.logs || []).length} logs.`);
+      // Backup db.json
+      try {
+        fs.copyFileSync(LEGACY_JSON_FILE, `${LEGACY_JSON_FILE}.bak`);
+      } catch (_) {}
+    }
+  } catch (err) {
+    console.error('[SQLite DB] Erro durante a inicialização/migração SQLite:', err);
+  }
+})();
+
+// --- Helper Parser Functions ---
+function formatBlockRow(row, mask = true) {
+  if (!row) return null;
+  let steps = [];
+  try { steps = JSON.parse(row.steps || '[]'); } catch (_) {}
+  let parameters = [];
+  try { parameters = JSON.parse(row.parameters || '[]').map(normalizeParameter); } catch (_) {}
+  let secrets = {};
+  try { secrets = JSON.parse(row.secrets || '{}'); } catch (_) {}
+
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || '',
+    category: row.category || 'general',
+    steps,
+    parameters,
+    secrets: mask ? maskSecrets(secrets) : secrets,
+    updatedAt: row.updated_at
+  };
+}
+
+function formatTaskRow(row) {
+  if (!row) return null;
+  let blocks = [];
+  try { blocks = JSON.parse(row.blocks || '[]'); } catch (_) {}
+  let executionVariables = [];
+  try { executionVariables = JSON.parse(row.execution_variables || '[]').map(normalizeParameter); } catch (_) {}
+
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || '',
+    blocks,
+    executionVariables,
+    blockIds: blocks.map(b => b.blockId),
+    antiDetection: Boolean(row.anti_detection),
+    updatedAt: row.updated_at
+  };
+}
+
+function formatScheduleRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    cronExpression: row.cron_expression,
+    enabled: Boolean(row.enabled),
+    lastRun: row.last_run || null,
+    nextRun: row.next_run || null,
+    updatedAt: row.updated_at
+  };
+}
+
+function formatLogRow(row, includeSteps = true) {
+  if (!row) return null;
+  let stepsExecuted = [];
+  if (includeSteps) {
+    try { stepsExecuted = JSON.parse(row.steps_executed || '[]'); } catch (_) {}
+  }
+  let executionVars = {};
+  try { executionVars = JSON.parse(row.execution_vars || '{}'); } catch (_) {}
+
+  const result = {
+    id: row.id,
+    taskId: row.task_id,
+    taskName: row.task_name,
+    trigger: row.trigger || 'manual',
+    scheduleId: row.schedule_id,
+    status: row.status,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    duration: row.duration !== null ? Number(row.duration) : 0,
+    currentBlockId: row.current_block_id,
+    currentBlockName: row.current_block_name,
+    currentStepIndex: row.current_step_index,
+    error: row.error,
+    screenshotPath: row.screenshot_path,
+    headless: row.headless !== null ? Boolean(row.headless) : true,
+    liveView: Boolean(row.live_view),
+    executionVars,
+    createdAt: row.created_at
+  };
+
+  if (includeSteps) {
+    result.stepsExecuted = stepsExecuted;
+  } else {
+    try {
+      const parsed = JSON.parse(row.steps_executed || '[]');
+      result.stepsCount = Array.isArray(parsed) ? parsed.length : 0;
+    } catch (_) {
+      result.stepsCount = 0;
+    }
+  }
+
+  return result;
+}
+
+// Cleanup any invalid or orphaned schedules
+try {
+  sqlite.prepare("DELETE FROM schedules WHERE task_id IS NULL OR trim(task_id) = ''").run();
+} catch (_) {}
+
+// --- DB API Object ---
 export const db = {
-  // Blocks
+  rawDb: sqlite,
+  // --- Blocks CRUD ---
   getBlocks(mask = true) {
-    const data = readDB();
-    if (!mask) return data.blocks;
-    return data.blocks.map(b => ({
-      ...b,
-      secrets: maskSecrets(b.secrets)
-    }));
+    const rows = sqlite.prepare('SELECT * FROM blocks ORDER BY name ASC').all();
+    return rows.map(r => formatBlockRow(r, mask));
   },
 
   getBlock(id, mask = true) {
-    const data = readDB();
-    const block = data.blocks.find(b => b.id === id);
-    if (!block) return null;
-    if (!mask) return block;
-    return {
-      ...block,
-      secrets: maskSecrets(block.secrets)
-    };
+    const row = sqlite.prepare('SELECT * FROM blocks WHERE id = ?').get(id);
+    return formatBlockRow(row, mask);
   },
 
   saveBlock(blockData) {
-    const data = readDB();
-    const existingIndex = data.blocks.findIndex(b => b.id === blockData.id);
-    
-    // Process secrets: encrypt any new secret values sent in plain text.
-    // If the value is '********' (masked), it means the user did not modify it, so preserve the old encrypted value.
-    const finalSecrets = {};
-    const oldBlock = existingIndex >= 0 ? data.blocks[existingIndex] : null;
+    const existing = blockData.id ? sqlite.prepare('SELECT * FROM blocks WHERE id = ?').get(blockData.id) : null;
+    const oldSecrets = existing ? JSON.parse(existing.secrets || '{}') : {};
 
+    // Process secrets: encrypt any new secret values sent in plain text.
+    // If '********', retain existing encrypted secret.
+    const finalSecrets = {};
     if (blockData.secrets) {
       for (const [key, val] of Object.entries(blockData.secrets)) {
         if (val === '********') {
-          // Keep existing encrypted value, checking if renamed from previous key
-          const originalOldKey = blockData.secretKeyRenames?.[key] || key;
-          finalSecrets[key] = oldBlock?.secrets?.[originalOldKey] || oldBlock?.secrets?.[key] || '';
+          if (oldSecrets[key]) {
+            finalSecrets[key] = oldSecrets[key];
+          }
         } else if (val) {
-          // Encrypt new value
           finalSecrets[key] = encrypt(val);
         }
       }
     }
 
-    const blockToSave = {
-      id: blockData.id || crypto.randomUUID(),
-      name: blockData.name || 'Untitled Block',
-      description: blockData.description || '',
-      steps: blockData.steps || [],
-      secrets: finalSecrets,
-      parameters: blockData.parameters || [],
-      updatedAt: new Date().toISOString()
-    };
+    const id = blockData.id || crypto.randomUUID();
+    const name = blockData.name || 'Untitled Block';
+    const description = blockData.description || '';
+    const category = blockData.category || 'general';
+    const steps = JSON.stringify(blockData.steps || []);
+    const parameters = JSON.stringify((blockData.parameters || []).map(normalizeParameter));
+    const secrets = JSON.stringify(finalSecrets);
+    const updatedAt = new Date().toISOString();
 
-    if (existingIndex >= 0) {
-      data.blocks[existingIndex] = blockToSave;
-    } else {
-      data.blocks.push(blockToSave);
-    }
+    sqlite.prepare(`
+      INSERT OR REPLACE INTO blocks (id, name, description, category, steps, parameters, secrets, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, name, description, category, steps, parameters, secrets, updatedAt);
 
-    writeDB(data);
-    return this.getBlock(blockToSave.id);
+    return formatBlockRow({
+      id,
+      name,
+      description,
+      category,
+      steps,
+      parameters,
+      secrets,
+      updated_at: updatedAt
+    }, true);
   },
 
   deleteBlock(id) {
-    const data = readDB();
-    const originalLength = data.blocks.length;
-    data.blocks = data.blocks.filter(b => b.id !== id);
-    if (data.blocks.length !== originalLength) {
-      writeDB(data);
-      return true;
-    }
-    return false;
+    const res = sqlite.prepare('DELETE FROM blocks WHERE id = ?').run(id);
+    return res.changes > 0;
   },
 
-  // Tasks (Pipelines)
+  // --- Tasks CRUD ---
   getTasks() {
-    const data = readDB();
-    return data.tasks.map(t => {
-      const blocks = t.blocks || (t.blockIds || []).map(bid => ({
-        id: crypto.randomUUID(),
-        blockId: bid,
-        parameterValues: {}
-      }));
-      return {
-        ...t,
-        blocks,
-        blockIds: blocks.map(b => b.blockId)
-      };
-    });
+    const rows = sqlite.prepare('SELECT * FROM tasks ORDER BY name ASC').all();
+    return rows.map(formatTaskRow);
   },
 
   getTask(id) {
-    const data = readDB();
-    const t = data.tasks.find(task => task.id === id);
-    if (!t) return null;
-    const blocks = t.blocks || (t.blockIds || []).map(bid => ({
-      id: crypto.randomUUID(),
-      blockId: bid,
-      parameterValues: {}
-    }));
-    return {
-      ...t,
-      blocks,
-      blockIds: blocks.map(b => b.blockId)
-    };
+    const row = sqlite.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+    return formatTaskRow(row);
   },
 
   saveTask(taskData) {
-    const data = readDB();
-    const existingIndex = data.tasks.findIndex(t => t.id === taskData.id);
-
     let finalBlocks = taskData.blocks || [];
     if (taskData.blockIds && finalBlocks.length === 0) {
       finalBlocks = taskData.blockIds.map(bid => ({
@@ -187,141 +427,118 @@ export const db = {
       }));
     }
 
-    const taskToSave = {
-      id: taskData.id || crypto.randomUUID(),
-      name: taskData.name || 'Untitled Task',
-      description: taskData.description || '',
-      blocks: finalBlocks,
-      antiDetection: !!taskData.antiDetection,
-      updatedAt: new Date().toISOString()
-    };
+    const id = taskData.id || crypto.randomUUID();
+    const name = taskData.name || 'Untitled Task';
+    const description = taskData.description || '';
+    const blocks = JSON.stringify(finalBlocks);
+    const executionVariables = JSON.stringify((taskData.executionVariables || []).map(normalizeParameter));
+    const antiDetection = taskData.antiDetection ? 1 : 0;
+    const updatedAt = new Date().toISOString();
 
-    if (existingIndex >= 0) {
-      data.tasks[existingIndex] = taskToSave;
-    } else {
-      data.tasks.push(taskToSave);
-    }
+    sqlite.prepare(`
+      INSERT OR REPLACE INTO tasks (id, name, description, blocks, execution_variables, anti_detection, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, name, description, blocks, executionVariables, antiDetection, updatedAt);
 
-    writeDB(data);
-    return {
-      ...taskToSave,
-      blockIds: taskToSave.blocks.map(b => b.blockId)
-    };
+    return formatTaskRow({
+      id,
+      name,
+      description,
+      blocks,
+      execution_variables: executionVariables,
+      anti_detection: antiDetection,
+      updated_at: updatedAt
+    });
   },
 
   deleteTask(id) {
-    const data = readDB();
-    const originalLength = data.tasks.length;
-    data.tasks = data.tasks.filter(t => t.id !== id);
-    // Also remove schedules associated with this task
-    data.schedules = data.schedules.filter(s => s.taskId !== id);
-    
-    if (data.tasks.length !== originalLength) {
-      writeDB(data);
-      return true;
-    }
-    return false;
+    // Delete schedules associated with task first (if not cascading)
+    sqlite.prepare('DELETE FROM schedules WHERE task_id = ?').run(id);
+    const res = sqlite.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+    return res.changes > 0;
   },
 
-  // Schedules
+  // --- Schedules CRUD ---
   getSchedules() {
-    const data = readDB();
-    return data.schedules;
+    const rows = sqlite.prepare('SELECT * FROM schedules ORDER BY updated_at DESC').all();
+    return rows.map(formatScheduleRow);
   },
 
   getSchedule(id) {
-    const data = readDB();
-    return data.schedules.find(s => s.id === id) || null;
+    const row = sqlite.prepare('SELECT * FROM schedules WHERE id = ?').get(id);
+    return formatScheduleRow(row);
   },
 
   saveSchedule(schedData) {
-    const data = readDB();
-    const existingIndex = data.schedules.findIndex(s => s.id === schedData.id);
+    const existing = schedData.id ? sqlite.prepare('SELECT * FROM schedules WHERE id = ?').get(schedData.id) : null;
+    const id = schedData.id || crypto.randomUUID();
+    const taskId = schedData.taskId || (existing ? existing.task_id : '');
+    const cronExpression = schedData.cronExpression || (existing ? existing.cron_expression : '* * * * *');
+    const enabled = schedData.enabled !== undefined ? (schedData.enabled ? 1 : 0) : (existing ? existing.enabled : 1);
+    
+    let lastRun = schedData.lastRun !== undefined ? schedData.lastRun : (existing ? existing.last_run : null);
+    let nextRun = schedData.nextRun !== undefined ? schedData.nextRun : (existing ? existing.next_run : null);
+    const updatedAt = new Date().toISOString();
 
-    let schedToSave;
-    if (existingIndex >= 0) {
-      const existing = data.schedules[existingIndex];
-      schedToSave = {
-        ...existing,
-        ...schedData,
-        updatedAt: new Date().toISOString()
-      };
-      // Explicitly handle fields that can be null
-      if (schedData.lastRun === null) schedToSave.lastRun = null;
-      if (schedData.nextRun === null) schedToSave.nextRun = null;
-      
-      data.schedules[existingIndex] = schedToSave;
-    } else {
-      schedToSave = {
-        id: schedData.id || crypto.randomUUID(),
-        taskId: schedData.taskId,
-        cronExpression: schedData.cronExpression,
-        enabled: schedData.enabled !== undefined ? schedData.enabled : true,
-        lastRun: schedData.lastRun || null,
-        nextRun: schedData.nextRun || null,
-        updatedAt: new Date().toISOString()
-      };
-      data.schedules.push(schedToSave);
-    }
+    sqlite.prepare(`
+      INSERT OR REPLACE INTO schedules (id, task_id, cron_expression, enabled, last_run, next_run, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, taskId, cronExpression, enabled, lastRun, nextRun, updatedAt);
 
-    writeDB(data);
-    return schedToSave;
+    return formatScheduleRow({
+      id,
+      task_id: taskId,
+      cron_expression: cronExpression,
+      enabled,
+      last_run: lastRun,
+      next_run: nextRun,
+      updated_at: updatedAt
+    });
   },
 
   deleteSchedule(id) {
-    const data = readDB();
-    const originalLength = data.schedules.length;
-    data.schedules = data.schedules.filter(s => s.id !== id);
-    if (data.schedules.length !== originalLength) {
-      writeDB(data);
-      return true;
-    }
-    return false;
+    const res = sqlite.prepare('DELETE FROM schedules WHERE id = ?').run(id);
+    return res.changes > 0;
   },
 
-  // Logs
+  // --- Logs CRUD ---
   getLogs(options = {}) {
-    const data = readDB();
-    let logs = (data.logs || []).slice().sort((a, b) => new Date(b.startedAt || b.createdAt) - new Date(a.startedAt || a.createdAt));
+    let whereClauses = [];
+    let params = [];
 
-    // If options are provided with filters or pagination
     if (options.status) {
-      logs = logs.filter(l => l.status === options.status);
+      whereClauses.push('status = ?');
+      params.push(options.status);
     }
     if (options.trigger) {
-      logs = logs.filter(l => l.trigger === options.trigger);
+      whereClauses.push('trigger = ?');
+      params.push(options.trigger);
     }
     if (options.search) {
-      const q = options.search.toLowerCase().trim();
-      logs = logs.filter(l => 
-        (l.taskName && l.taskName.toLowerCase().includes(q)) ||
-        (l.id && l.id.toLowerCase().includes(q)) ||
-        (l.error && l.error.toLowerCase().includes(q))
-      );
+      const q = `%${options.search.toLowerCase().trim()}%`;
+      whereClauses.push('(LOWER(task_name) LIKE ? OR LOWER(id) LIKE ? OR LOWER(error) LIKE ?)');
+      params.push(q, q, q);
     }
 
-    const total = logs.length;
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const totalRow = sqlite.prepare(`SELECT count(*) as total FROM logs ${whereSql}`).get(...params);
+    const total = totalRow.total;
 
-    // Check if summary projection is requested
-    if (options.summary) {
-      logs = logs.map(l => {
-        const { stepsExecuted, ...rest } = l;
-        return {
-          ...rest,
-          stepsCount: Array.isArray(stepsExecuted) ? stepsExecuted.length : 0
-        };
-      });
-    }
+    let orderLimitSql = 'ORDER BY started_at DESC';
+    const isSummary = Boolean(options.summary);
 
     if (options.page || options.limit) {
       const page = Math.max(1, parseInt(options.page, 10) || 1);
       const limit = Math.max(1, parseInt(options.limit, 10) || 20);
       const totalPages = Math.ceil(total / limit) || 1;
-      const startIndex = (page - 1) * limit;
-      const paginatedLogs = logs.slice(startIndex, startIndex + limit);
+      const offset = (page - 1) * limit;
+
+      const rows = sqlite.prepare(`
+        SELECT * FROM logs ${whereSql} ORDER BY started_at DESC LIMIT ? OFFSET ?
+      `).all(...params, limit, offset);
 
       return {
-        logs: paginatedLogs,
+        logs: rows.map(r => formatLogRow(r, !isSummary)),
         total,
         page,
         limit,
@@ -329,15 +546,20 @@ export const db = {
       };
     }
 
-    return logs;
+    const rows = sqlite.prepare(`SELECT * FROM logs ${whereSql} ORDER BY started_at DESC`).all(...params);
+    return rows.map(r => formatLogRow(r, !isSummary));
+  },
+
+  getLog(id) {
+    const row = sqlite.prepare('SELECT * FROM logs WHERE id = ?').get(id);
+    return formatLogRow(row, true);
   },
 
   getStats() {
-    const data = readDB();
-    const logs = data.logs || [];
-    const tasks = data.tasks || [];
-    const blocks = data.blocks || [];
-    const schedules = data.schedules || [];
+    const logs = sqlite.prepare('SELECT status, duration FROM logs').all();
+    const tasksCount = sqlite.prepare('SELECT count(*) as count FROM tasks').get().count;
+    const blocksCount = sqlite.prepare('SELECT count(*) as count FROM blocks').get().count;
+    const schedulesActive = sqlite.prepare('SELECT count(*) as count FROM schedules WHERE enabled = 1').get().count;
 
     const totalRuns = logs.length;
     let successCount = 0;
@@ -351,7 +573,7 @@ export const db = {
       else if (log.status === 'failure') failureCount++;
       else if (log.status === 'running') runningCount++;
 
-      if (log.duration !== undefined && log.duration !== null && log.status !== 'running') {
+      if (log.duration !== null && log.status !== 'running') {
         totalDuration += Number(log.duration) || 0;
         durationCount++;
       }
@@ -360,7 +582,6 @@ export const db = {
     const resolvedRuns = successCount + failureCount;
     const successRate = resolvedRuns > 0 ? Math.round((successCount / resolvedRuns) * 100) : 100;
     const averageDurationSeconds = durationCount > 0 ? Math.round((totalDuration / durationCount) * 10) / 10 : 0;
-    const activeSchedules = schedules.filter(s => s.enabled).length;
 
     return {
       totalRuns,
@@ -368,158 +589,274 @@ export const db = {
       failureCount,
       runningCount,
       successRate,
-      totalTasks: tasks.length,
-      totalBlocks: blocks.length,
-      activeSchedules,
+      totalTasks: tasksCount,
+      totalBlocks: blocksCount,
+      activeSchedules: schedulesActive,
       averageDurationSeconds
     };
   },
 
-  getLog(id) {
-    const data = readDB();
-    return data.logs.find(l => l.id === id) || null;
-  },
-
   addLog(logData) {
-    const data = readDB();
     const id = (typeof logData.id === 'string' && logData.id.trim()) ? logData.id.trim() : crypto.randomUUID();
-    const existingIndex = data.logs.findIndex(l => l.id === id);
+    const taskId = typeof logData.taskId === 'string' ? logData.taskId : null;
+    const taskName = typeof logData.taskName === 'string' ? logData.taskName : null;
+    const trigger = typeof logData.trigger === 'string' ? logData.trigger : 'manual';
+    const scheduleId = typeof logData.scheduleId === 'string' ? logData.scheduleId : null;
+    const status = typeof logData.status === 'string' ? logData.status : 'running';
+    const startedAt = typeof logData.startedAt === 'string' ? logData.startedAt : (typeof logData.createdAt === 'string' ? logData.createdAt : new Date().toISOString());
+    const endedAt = typeof logData.endedAt === 'string' ? logData.endedAt : null;
+    const duration = typeof logData.duration === 'number' ? logData.duration : (logData.duration !== undefined && logData.duration !== null ? Number(logData.duration) : null);
+    const currentBlockId = typeof logData.currentBlockId === 'string' ? logData.currentBlockId : null;
+    const currentBlockName = typeof logData.currentBlockName === 'string' ? logData.currentBlockName : null;
+    const currentStepIndex = typeof logData.currentStepIndex === 'number' ? logData.currentStepIndex : -1;
+    const error = typeof logData.error === 'string' ? logData.error : (logData.error ? JSON.stringify(logData.error) : null);
+    const stepsExecuted = JSON.stringify(logData.stepsExecuted || []);
+    const screenshotPath = typeof logData.screenshotPath === 'string' ? logData.screenshotPath : null;
+    const headless = logData.headless === false ? 0 : 1;
+    const liveView = logData.liveView ? 1 : 0;
+    const executionVars = JSON.stringify(logData.executionVars || {});
+    const createdAt = typeof logData.createdAt === 'string' ? logData.createdAt : new Date().toISOString();
 
-    const logToSave = {
-      ...logData,
-      id,
-      createdAt: logData.createdAt || new Date().toISOString()
-    };
-    
-    if (existingIndex >= 0) {
-      data.logs[existingIndex] = logToSave;
-    } else {
-      data.logs.push(logToSave);
-    }
+    sqlite.prepare(`
+      INSERT OR REPLACE INTO logs (
+        id, task_id, task_name, trigger, schedule_id, status, started_at, ended_at, duration,
+        current_block_id, current_block_name, current_step_index, error, steps_executed,
+        screenshot_path, headless, live_view, execution_vars, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, taskId, taskName, trigger, scheduleId, status, startedAt, endedAt, duration,
+      currentBlockId, currentBlockName, currentStepIndex, error, stepsExecuted,
+      screenshotPath, headless, liveView, executionVars, createdAt
+    );
 
-    if (data.logs.length > 200) {
-      // Sort oldest first and shift
-      data.logs.sort((a, b) => new Date(a.startedAt) - new Date(b.startedAt));
-      const removedLogs = data.logs.slice(0, data.logs.length - 200);
-      data.logs = data.logs.slice(data.logs.length - 200);
-
-      // Clean up orphaned screenshots if any
-      for (const log of removedLogs) {
-        if (log.screenshotPath && fs.existsSync(log.screenshotPath)) {
-          try { fs.unlinkSync(log.screenshotPath); } catch (_) {}
+    // Limit to 200 logs
+    const countRow = sqlite.prepare('SELECT count(*) as count FROM logs').get();
+    if (countRow.count > 200) {
+      const overflow = countRow.count - 200;
+      const oldestRows = sqlite.prepare('SELECT id, screenshot_path, steps_executed FROM logs ORDER BY started_at ASC LIMIT ?').all(overflow);
+      
+      for (const row of oldestRows) {
+        if (row.screenshot_path) {
+          const fullPath = path.join(DATA_DIR, 'screenshots', path.basename(row.screenshot_path));
+          try { if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath); } catch (_) {}
         }
-        if (log.stepsExecuted) {
-          for (const step of log.stepsExecuted) {
-            if (step.screenshotPath && fs.existsSync(step.screenshotPath)) {
-              try { fs.unlinkSync(step.screenshotPath); } catch (_) {}
+        try {
+          const steps = JSON.parse(row.steps_executed || '[]');
+          for (const s of steps) {
+            if (s.screenshotPath) {
+              const fullPath = path.join(DATA_DIR, 'screenshots', path.basename(s.screenshotPath));
+              try { if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath); } catch (_) {}
             }
           }
-        }
+        } catch (_) {}
       }
+
+      const idsToDelete = oldestRows.map(r => r.id);
+      const deleteStmt = sqlite.prepare(`DELETE FROM logs WHERE id IN (${idsToDelete.map(() => '?').join(',')})`);
+      deleteStmt.run(...idsToDelete);
     }
 
-    writeDB(data);
-    return logToSave;
+    return formatLogRow({
+      id,
+      task_id: taskId,
+      task_name: taskName,
+      trigger,
+      schedule_id: scheduleId,
+      status,
+      started_at: startedAt,
+      ended_at: endedAt,
+      duration,
+      current_block_id: currentBlockId,
+      current_block_name: currentBlockName,
+      current_step_index: currentStepIndex,
+      error,
+      steps_executed: stepsExecuted,
+      screenshot_path: screenshotPath,
+      headless,
+      live_view: liveView,
+      execution_vars: executionVars,
+      created_at: createdAt
+    }, true);
   },
 
   clearLogs() {
-    const data = readDB();
-    // Delete all screenshot files
-    for (const log of data.logs) {
-      if (log.screenshotPath && fs.existsSync(log.screenshotPath)) {
-        try { fs.unlinkSync(log.screenshotPath); } catch (_) {}
+    const allLogs = sqlite.prepare('SELECT screenshot_path, steps_executed FROM logs').all();
+    for (const row of allLogs) {
+      if (row.screenshot_path) {
+        const fullPath = path.join(DATA_DIR, 'screenshots', path.basename(row.screenshot_path));
+        try { if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath); } catch (_) {}
       }
-      if (log.stepsExecuted) {
-        for (const step of log.stepsExecuted) {
-          if (step.screenshotPath && fs.existsSync(step.screenshotPath)) {
-            try { fs.unlinkSync(step.screenshotPath); } catch (_) {}
+      try {
+        const steps = JSON.parse(row.steps_executed || '[]');
+        for (const s of steps) {
+          if (s.screenshotPath) {
+            const fullPath = path.join(DATA_DIR, 'screenshots', path.basename(s.screenshotPath));
+            try { if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath); } catch (_) {}
           }
         }
-      }
+      } catch (_) {}
     }
-    data.logs = [];
-    writeDB(data);
+    sqlite.prepare('DELETE FROM logs').run();
     return true;
   },
 
+  // --- Settings ---
   getSettings() {
-    const data = readDB();
-    if (!data.settings) {
-      data.settings = { autoCleanEnabled: false, retentionDays: 30, startHookUrl: '', endHookUrl: '' };
-    } else {
-      data.settings.startHookUrl = data.settings.startHookUrl || '';
-      data.settings.endHookUrl = data.settings.endHookUrl || '';
+    const rows = sqlite.prepare('SELECT * FROM settings').all();
+    const result = { autoCleanEnabled: false, retentionDays: 30, startHookUrl: '', endHookUrl: '' };
+    for (const r of rows) {
+      if (r.key === 'autoCleanEnabled') result.autoCleanEnabled = r.value === 'true' || r.value === '1';
+      else if (r.key === 'retentionDays') result.retentionDays = parseInt(r.value, 10) || 30;
+      else if (r.key === 'startHookUrl') result.startHookUrl = r.value || '';
+      else if (r.key === 'endHookUrl') result.endHookUrl = r.value || '';
     }
-    return data.settings;
+    return result;
   },
 
   saveSettings(settings) {
-    const data = readDB();
-    data.settings = {
-      autoCleanEnabled: !!settings.autoCleanEnabled,
-      retentionDays: parseInt(settings.retentionDays, 10) || 30,
-      startHookUrl: settings.startHookUrl || '',
-      endHookUrl: settings.endHookUrl || ''
-    };
-    writeDB(data);
-    return data.settings;
+    const upsert = sqlite.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    const tx = sqlite.transaction(() => {
+      upsert.run('autoCleanEnabled', settings.autoCleanEnabled ? 'true' : 'false');
+      upsert.run('retentionDays', String(parseInt(settings.retentionDays, 10) || 30));
+      upsert.run('startHookUrl', settings.startHookUrl || '');
+      upsert.run('endHookUrl', settings.endHookUrl || '');
+    });
+    tx();
+    return this.getSettings();
   },
 
+  // --- Import Entire Database ---
   importDatabase(newData) {
-    if (!newData || typeof newData !== 'object') throw new Error('Dados inválidos');
-    const validated = {
-      blocks: Array.isArray(newData.blocks) ? newData.blocks : [],
-      tasks: Array.isArray(newData.tasks) ? newData.tasks : [],
-      schedules: Array.isArray(newData.schedules) ? newData.schedules : [],
-      logs: Array.isArray(newData.logs) ? newData.logs : [],
-      settings: newData.settings || { autoCleanEnabled: false, retentionDays: 30, startHookUrl: '', endHookUrl: '' }
-    };
-    writeDB(validated);
+    if (!newData || typeof newData !== 'object') throw new Error('Dados inválidos para importação.');
+    const importTx = sqlite.transaction(() => {
+      sqlite.prepare('DELETE FROM logs').run();
+      sqlite.prepare('DELETE FROM schedules').run();
+      sqlite.prepare('DELETE FROM tasks').run();
+      sqlite.prepare('DELETE FROM blocks').run();
+      sqlite.prepare('DELETE FROM settings').run();
+
+      const insertBlock = sqlite.prepare(`
+        INSERT INTO blocks (id, name, description, category, steps, parameters, secrets, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const b of newData.blocks || []) {
+        const params = (b.parameters || []).map(normalizeParameter);
+        insertBlock.run(
+          b.id || crypto.randomUUID(),
+          b.name || 'Untitled Block',
+          b.description || '',
+          b.category || 'general',
+          JSON.stringify(b.steps || []),
+          JSON.stringify(params),
+          JSON.stringify(b.secrets || {}),
+          b.updatedAt || new Date().toISOString()
+        );
+      }
+
+      const insertTask = sqlite.prepare(`
+        INSERT INTO tasks (id, name, description, blocks, execution_variables, anti_detection, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const t of newData.tasks || []) {
+        const execVars = (t.executionVariables || []).map(normalizeParameter);
+        insertTask.run(
+          t.id || crypto.randomUUID(),
+          t.name || 'Untitled Task',
+          t.description || '',
+          JSON.stringify(t.blocks || []),
+          JSON.stringify(execVars),
+          t.antiDetection ? 1 : 0,
+          t.updatedAt || new Date().toISOString()
+        );
+      }
+
+      const insertSchedule = sqlite.prepare(`
+        INSERT INTO schedules (id, task_id, cron_expression, enabled, last_run, next_run, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const s of newData.schedules || []) {
+        insertSchedule.run(
+          s.id || crypto.randomUUID(),
+          s.taskId || '',
+          s.cronExpression || '* * * * *',
+          s.enabled ? 1 : 0,
+          s.lastRun || null,
+          s.nextRun || null,
+          s.updatedAt || new Date().toISOString()
+        );
+      }
+
+      const insertLog = sqlite.prepare(`
+        INSERT INTO logs (id, task_id, task_name, trigger, schedule_id, status, started_at, ended_at, duration, current_block_id, current_block_name, current_step_index, error, steps_executed, screenshot_path, headless, live_view, execution_vars, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const l of newData.logs || []) {
+        insertLog.run(
+          typeof l.id === 'string' ? l.id : crypto.randomUUID(),
+          typeof l.taskId === 'string' ? l.taskId : null,
+          typeof l.taskName === 'string' ? l.taskName : null,
+          typeof l.trigger === 'string' ? l.trigger : 'manual',
+          typeof l.scheduleId === 'string' ? l.scheduleId : null,
+          typeof l.status === 'string' ? l.status : 'success',
+          typeof l.startedAt === 'string' ? l.startedAt : (typeof l.createdAt === 'string' ? l.createdAt : new Date().toISOString()),
+          typeof l.endedAt === 'string' ? l.endedAt : null,
+          typeof l.duration === 'number' ? l.duration : (l.duration !== undefined && l.duration !== null ? Number(l.duration) : null),
+          typeof l.currentBlockId === 'string' ? l.currentBlockId : null,
+          typeof l.currentBlockName === 'string' ? l.currentBlockName : null,
+          typeof l.currentStepIndex === 'number' ? l.currentStepIndex : -1,
+          typeof l.error === 'string' ? l.error : (l.error ? JSON.stringify(l.error) : null),
+          JSON.stringify(l.stepsExecuted || []),
+          typeof l.screenshotPath === 'string' ? l.screenshotPath : null,
+          l.headless === false ? 0 : 1,
+          l.liveView ? 1 : 0,
+          JSON.stringify(l.executionVars || {}),
+          typeof l.createdAt === 'string' ? l.createdAt : new Date().toISOString()
+        );
+      }
+
+      if (newData.settings) {
+        const insertSetting = sqlite.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+        for (const [k, v] of Object.entries(newData.settings)) {
+          insertSetting.run(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+        }
+      }
+    });
+
+    importTx();
     return true;
   },
 
+  // --- Auto-cleanup ---
   cleanExpiredLogs() {
-    const data = readDB();
-    if (!data.settings || !data.settings.autoCleanEnabled) {
-      return 0;
-    }
-    const retentionDays = parseInt(data.settings.retentionDays, 10) || 30;
+    const settings = this.getSettings();
+    if (!settings.autoCleanEnabled) return 0;
+
+    const retentionDays = parseInt(settings.retentionDays, 10) || 30;
     const thresholdDate = new Date();
     thresholdDate.setDate(thresholdDate.getDate() - retentionDays);
-    
-    let deletedCount = 0;
-    const activeLogs = [];
-    
-    for (const log of data.logs) {
-      const logDate = new Date(log.startedAt || log.createdAt);
-      if (logDate < thresholdDate) {
-        deletedCount++;
-        if (log.screenshotPath) {
-          const fullPath = path.join(DATA_DIR, 'screenshots', path.basename(log.screenshotPath));
-          try { if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath); } catch (_) {}
-        }
-        if (log.stepsExecuted) {
-          for (const step of log.stepsExecuted) {
-            if (step.screenshotPath) {
-              const fullPath = path.join(DATA_DIR, 'screenshots', path.basename(step.screenshotPath));
-              try { if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath); } catch (_) {}
-            }
-            if (step.downloadPath) {
-              const fullPath = path.join(DATA_DIR, 'downloads', path.basename(step.downloadPath));
-              try { if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath); } catch (_) {}
-            }
+    const thresholdIso = thresholdDate.toISOString();
+
+    const expiredLogs = sqlite.prepare('SELECT id, screenshot_path, steps_executed FROM logs WHERE started_at < ?').all(thresholdIso);
+    for (const log of expiredLogs) {
+      if (log.screenshot_path) {
+        const fullPath = path.join(DATA_DIR, 'screenshots', path.basename(log.screenshot_path));
+        try { if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath); } catch (_) {}
+      }
+      try {
+        const steps = JSON.parse(log.steps_executed || '[]');
+        for (const step of steps) {
+          if (step.screenshotPath) {
+            const fullPath = path.join(DATA_DIR, 'screenshots', path.basename(step.screenshotPath));
+            try { if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath); } catch (_) {}
           }
         }
-      } else {
-        activeLogs.push(log);
-      }
+      } catch (_) {}
     }
-    
-    if (deletedCount > 0) {
-      data.logs = activeLogs;
-      writeDB(data);
-      console.log(`Auto-cleanup: deleted ${deletedCount} logs older than ${retentionDays} days.`);
+
+    const res = sqlite.prepare('DELETE FROM logs WHERE started_at < ?').run(thresholdIso);
+    if (res.changes > 0) {
+      console.log(`[SQLite DB] Auto-cleanup: deleted ${res.changes} logs older than ${retentionDays} days.`);
     }
-    return deletedCount;
+    return res.changes;
   }
 };

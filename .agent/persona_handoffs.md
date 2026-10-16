@@ -13,3 +13,11 @@
 ## 💻 Handoff: frontend-orchestrator -> fullstack-code-reviewer
 - **Architecture**: Modular decomposition of `App.jsx` into layout, views, context providers, and code components.
 - **Code Presentation**: Integration of PrismJS and syntax validation helpers.
+
+## 🗄️ Handoff: database-orchestrator & backend-orchestrator -> Sprint Team
+- **Persistence**: Migration to SQLite (`better-sqlite3`) in WAL mode (`backend/data/database.sqlite`), automatic schema setup and import from `db.json`.
+- **Variable Types**: Automatic normalization of parameters to default `text`, date/datetime standard `now` format (`DD/MM/YYYY`, `DD/MM/YYYY HH:mm`), number casting for math, select/multiselect line-break option parsing.
+- **Execution Variables**: Task-level declaration and automatic synchronization into `window.vars` and JS `eval` context.
+- **JS Function Action**: User provides only body; engine encapsulates into async wrapper with access to `vars`.
+- **Headless Enforcement**: Blocking headless runs on `manual_interaction` or unskipped `user_prompt`.
+

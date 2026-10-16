@@ -5,13 +5,27 @@
   - Frontend: `React (Vite) + Vanilla CSS + Lucide Icons + PrismJS`
   - Backend: `Node.js / Express (ES Modules)`
   - Automation Engine: `Playwright (Headless/Headed Chromium)`
-  - Database: `JSON Database (Atomic Writes)`
+  - Database: `SQLite (better-sqlite3 in WAL mode)`
   - Design: `Cyberpunk Dark Theme + Glassmorphism + Modal System 2.0`
-- **Current Phase**: `COMPLETE`
+- **Current Phase**: `PHASE 4: IMPLEMENTATION & SPRINT`
 - **Active Persona**: `web-dev-orchestrator`
-- **Last Updated**: 2026-09-23 14:55
+- **Last Updated**: 2026-10-16 15:15
 
 ## 🎯 Project Goals & Scope
+- **Goal 12 (Typed Variables & Formats)**:
+  - Definir tipos de variáveis: Texto (`text`), Número (`number`), Data (`date`), Data e Hora (`datetime`), Seletor (`select`), Multi Seleção (`multiselect`).
+  - Tipo padrão: `text`. Migração e carregamento asseguram que variáveis legadas sem tipo virem `text`.
+  - Data e Data/Hora: padrão `now` brasileiro (`DD/MM/YYYY` e `DD/MM/YYYY HH:mm`), máscara de digitação e seletor gráfico.
+  - Seletor e Multi Seleção: opções definidas via textarea (uma por linha); seletor retorna string, multiselect retorna array.
+  - Número: aceita inteiros e decimais e armazena como number nativo para operações aritméticas em JS.
+- **Goal 13 (Variáveis de Execução & JS Body-Only)**:
+  - Declaradas no início do pipeline (`task.executionVariables`).
+  - Qualquer função JS pode ler e atribuir (`vars.nome = valor`, `executionVars.nome`).
+  - Em ações JS (`eval`), torna-se desnecessário escrever função anônima: apenas o corpo da função é escrito.
+- **Goal 14 (Trava de Execução Headless)**:
+  - Não permitir rodar em headless quando houver ação de interação manual ou prompt interativo com variáveis não marcadas para pular.
+- **Goal 15 (Migração para SQLite WAL)**:
+  - Migrar persistência de `db.json` para SQLite com `better-sqlite3`, WAL mode, foreign keys e migração automática dos dados existentes.
 - **Goal 1 (UX & Navigation 2.0)**: Decompose monolithic 2,979-line `App.jsx` into focused, high-performance modular components. Introduce Command Palette (⌘K), browser history URL synchronization, breadcrumbs, non-blocking toast notifications, and fluid micro-transitions.
 - **Goal 2 (Data Management)**: Optimize network usage and server responsiveness with dedicated aggregate stats (`/api/system/stats`), low-overhead active run monitoring (`/api/runs/active`), and paginated/summarized logs (`/api/logs?summary=true`).
 - **Goal 3 (Code Presentation & Validation)**: Rich syntax highlighting and client-side code validation (JS syntax check, JSON verification, XPath linting) across all automation steps (`eval`, `dynamic_script`, HTML inspect, JSON data).
