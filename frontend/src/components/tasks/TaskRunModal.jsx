@@ -1,12 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { XCircle, Play, HelpCircle, Monitor, Eye, Variable, AlertTriangle } from 'lucide-react';
+import { XCircle, Play, HelpCircle, Monitor, Eye, Variable, AlertTriangle, Bot, Download, Copy, Check, FileText } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import { castVariableValue, getDefaultValueForType } from '../../utils/variableTypes';
 import TypedVariableInput from '../common/TypedVariableInput';
+import AgentSkillModal from '../common/AgentSkillModal';
 
 export default function TaskRunModal({ task, onStartRun, onClose }) {
   const { blocks } = useData();
   const [runOverrides, setRunOverrides] = useState({});
+  const [showSkillModal, setShowSkillModal] = useState(false);
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
+
+  // Check if any block in this pipeline contains agent_control (Handoff Agente mode)
+  const hasAgentControl = Boolean(task?.blocks?.some(instance => {
+    const blkId = instance.blockId || instance;
+    const blk = blocks.find(b => b.id === blkId);
+    return blk?.steps?.some(s => s.type === 'agent_control');
+  }));
 
   // Check if any block in this pipeline contains manual_interaction (Requirement 3.1)
   const hasManualInteraction = Boolean(task?.blocks?.some(instance => {
@@ -21,6 +31,25 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
     const blk = blocks.find(b => b.id === blkId);
     return blk?.steps?.some(s => s.type === 'user_prompt');
   }));
+
+  const handleDownloadSkill = () => {
+    window.location.href = '/api/agent/skill/download';
+  };
+
+  const handleCopyPrompt = () => {
+    const promptText = `Você está integrando com o AutoRPA no modo Handoff Agente.
+URL Base: ${window.location.origin}
+Endpoints essenciais:
+1. Detectar sessão: GET /api/agent/sessions
+2. Assumir controle: POST /api/agent/acquire { "runId": "<runId>" }
+3. Comandos: POST /api/agent/execute { "runId": "<runId>", "action": "eval|navigate|click|fill|screenshot|html", "params": {...} }
+4. Devolver controle: POST /api/agent/release { "runId": "<runId>" }
+
+Instrução: Aguarde a pipeline pausar no passo 'agent_control', assuma a sessão, execute as ações necessárias no navegador e devolva o controle chamando /api/agent/release.`;
+    navigator.clipboard.writeText(promptText);
+    setCopiedPrompt(true);
+    setTimeout(() => setCopiedPrompt(false), 2500);
+  };
 
   const [runTaskVars, setRunTaskVars] = useState(() => {
     const promptVars = {};
@@ -228,6 +257,114 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
             </div>
           </div>
 
+          {/* Handoff Agente Banner & Skill Download Card */}
+          {hasAgentControl && (
+            <div
+              style={{
+                padding: '14px 16px',
+                background: 'rgba(168, 85, 247, 0.06)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid rgba(168, 85, 247, 0.3)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '8px',
+                      background: 'rgba(168, 85, 247, 0.2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#c084fc',
+                      border: '1px solid rgba(168, 85, 247, 0.4)'
+                    }}
+                  >
+                    <Bot size={18} />
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '13px', fontWeight: 700, color: '#d8b4fe', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      Modo Handoff Agente Ativo
+                    </span>
+                    <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)' }}>
+                      Esta pipeline pausa no passo <code style={{ color: '#c084fc' }}>agent_control</code> para que um Agente de IA assuma o navegador.
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={handleCopyPrompt}
+                    className="btn btn-secondary"
+                    style={{
+                      fontSize: '11px',
+                      padding: '6px 12px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      background: 'rgba(255, 255, 255, 0.05)',
+                      borderColor: 'rgba(168, 85, 247, 0.3)',
+                      color: copiedPrompt ? '#4ade80' : 'var(--text-light)'
+                    }}
+                    title="Copiar prompt rápido para colar no chat com a IA"
+                  >
+                    {copiedPrompt ? <Check size={13} /> : <Copy size={13} />}
+                    {copiedPrompt ? 'Instruções Copiadas!' : 'Copiar Prompt'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowSkillModal(true)}
+                    className="btn btn-secondary"
+                    style={{
+                      fontSize: '11px',
+                      padding: '6px 12px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      background: 'rgba(255, 255, 255, 0.05)',
+                      borderColor: 'rgba(168, 85, 247, 0.3)',
+                      color: '#d8b4fe'
+                    }}
+                    title="Ver guia e exemplos de uso da API Handoff"
+                  >
+                    <FileText size={13} /> Ver Skill
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleDownloadSkill}
+                    className="btn btn-primary"
+                    style={{
+                      fontSize: '11px',
+                      padding: '6px 14px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      background: '#9333ea',
+                      borderColor: '#a855f7',
+                      color: '#ffffff',
+                      fontWeight: 600
+                    }}
+                    title="Baixar arquivo SKILL.md para Claude, Antigravity ou Agentes autônomos"
+                  >
+                    <Download size={13} /> Baixar Skill (.md)
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ fontSize: '11px', color: '#cbd5e1', lineHeight: '1.4', background: 'rgba(0, 0, 0, 0.25)', padding: '8px 12px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                💡 Durante a pausa da pipeline, o agente externo assumirá a sessão via API REST (<code>/api/agent/acquire</code>), executará comandos (como resolver desafios visuais ou preenchimento dinâmico) e chamará <code>/api/agent/release</code> para retomar o restante da pipeline.
+              </div>
+            </div>
+          )}
+
           {/* Blocks parameters override */}
           {(task.blocks || []).map((instance, index) => {
             const block = blocks.find(b => b.id === instance.blockId);
@@ -388,6 +525,8 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
           </button>
         </div>
       </div>
+
+      {showSkillModal && <AgentSkillModal onClose={() => setShowSkillModal(false)} />}
     </div>
   );
 }

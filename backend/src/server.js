@@ -603,6 +603,40 @@ app.post('/api/agent/release', (req, res) => {
   }
 });
 
+// GET /api/agent/skill - Retrieve Agent Handoff skill documentation
+app.get('/api/agent/skill', (req, res) => {
+  try {
+    const skillPath = path.resolve(__dirname, '../../.agents/skills/autorpa-agent-handoff/SKILL.md');
+    if (!fs.existsSync(skillPath)) {
+      return res.status(404).json({ error: 'Skill documentation not found' });
+    }
+    const content = fs.readFileSync(skillPath, 'utf8');
+    res.json({
+      name: 'autorpa-agent-handoff',
+      filename: 'autorpa-agent-handoff.skill.md',
+      content
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/agent/skill/download - Direct file download of SKILL.md
+app.get('/api/agent/skill/download', (req, res) => {
+  try {
+    const skillPath = path.resolve(__dirname, '../../.agents/skills/autorpa-agent-handoff/SKILL.md');
+    if (!fs.existsSync(skillPath)) {
+      return res.status(404).json({ error: 'Skill file not found' });
+    }
+    res.setHeader('Content-Disposition', 'attachment; filename="autorpa-agent-handoff.skill.md"');
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    const content = fs.readFileSync(skillPath, 'utf8');
+    res.send(content);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // --- 6. INTERACTIVE USER PROMPT API ---
 
 // GET /api/interactive/sessions - Retrieve active interactive prompt sessions
