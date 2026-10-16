@@ -54,7 +54,12 @@ app.post('/api/auth/login', (req, res) => {
 
 // Middleware to protect API routes
 app.use((req, res, next) => {
-  if (SYSTEM_PASSWORD && req.path.startsWith('/api/') && !req.path.startsWith('/api/auth/')) {
+  if (
+    SYSTEM_PASSWORD &&
+    req.path.startsWith('/api/') &&
+    !req.path.startsWith('/api/auth/') &&
+    !req.path.startsWith('/api/agent/skill')
+  ) {
     const authHeader = req.headers['x-system-password'] || req.query.token || req.query.auth || req.query.password;
     if (authHeader !== SYSTEM_PASSWORD) {
       return res.status(401).json({ error: 'Acesso não autorizado. Autenticação pendente.' });

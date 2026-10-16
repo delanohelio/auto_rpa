@@ -32,8 +32,30 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
     return blk?.steps?.some(s => s.type === 'user_prompt');
   }));
 
-  const handleDownloadSkill = () => {
-    window.location.href = '/api/agent/skill/download';
+  const handleDownloadSkill = async () => {
+    try {
+      const saved = localStorage.getItem('systemPassword');
+      const url = saved ? `/api/agent/skill/download?password=${encodeURIComponent(saved)}` : '/api/agent/skill/download';
+      const res = await fetch(url, {
+        headers: saved ? { 'x-system-password': saved } : {}
+      });
+      if (!res.ok) throw new Error('Falha no download');
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = 'autorpa-agent-handoff.skill.md';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      console.error('Erro no download via blob, tentando fallback:', err);
+      const saved = localStorage.getItem('systemPassword');
+      window.location.href = saved 
+        ? `/api/agent/skill/download?password=${encodeURIComponent(saved)}` 
+        : '/api/agent/skill/download';
+    }
   };
 
   const handleCopyPrompt = () => {

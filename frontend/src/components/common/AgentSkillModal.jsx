@@ -8,7 +8,9 @@ export default function AgentSkillModal({ onClose }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/agent/skill')
+    const saved = localStorage.getItem('systemPassword');
+    const headers = saved ? { 'x-system-password': saved } : {};
+    fetch('/api/agent/skill', { headers })
       .then(res => res.json())
       .then(data => {
         if (data.content) {
@@ -25,8 +27,30 @@ export default function AgentSkillModal({ onClose }) {
     setTimeout(() => setCopiedCode(''), 2500);
   };
 
-  const handleDownload = () => {
-    window.location.href = '/api/agent/skill/download';
+  const handleDownload = async () => {
+    try {
+      const saved = localStorage.getItem('systemPassword');
+      const url = saved ? `/api/agent/skill/download?password=${encodeURIComponent(saved)}` : '/api/agent/skill/download';
+      const res = await fetch(url, {
+        headers: saved ? { 'x-system-password': saved } : {}
+      });
+      if (!res.ok) throw new Error('Falha no download');
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = 'autorpa-agent-handoff.skill.md';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      console.error('Erro no download via blob, tentando fallback:', err);
+      const saved = localStorage.getItem('systemPassword');
+      window.location.href = saved 
+        ? `/api/agent/skill/download?password=${encodeURIComponent(saved)}` 
+        : '/api/agent/skill/download';
+    }
   };
 
   const nodeCode = `import fetch from 'node-fetch'; // ou nativo no Node 18+
