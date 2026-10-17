@@ -24,6 +24,7 @@ RUN npm install --prefix frontend
 # Copy the rest of the application code
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
+COPY .agents/ ./.agents/
 
 # Build the frontend assets
 RUN npm run build:frontend

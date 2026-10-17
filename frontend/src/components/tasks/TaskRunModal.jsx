@@ -34,11 +34,7 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
 
   const handleDownloadSkill = async () => {
     try {
-      const saved = localStorage.getItem('systemPassword');
-      const url = saved ? `/api/agent/skill/download?password=${encodeURIComponent(saved)}` : '/api/agent/skill/download';
-      const res = await fetch(url, {
-        headers: saved ? { 'x-system-password': saved } : {}
-      });
+      const res = await fetch('/api/agent/skill/download');
       if (!res.ok) throw new Error('Falha no download');
       const blob = await res.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
@@ -50,24 +46,27 @@ export default function TaskRunModal({ task, onStartRun, onClose }) {
       a.remove();
       window.URL.revokeObjectURL(downloadUrl);
     } catch (err) {
-      console.error('Erro no download via blob, tentando fallback:', err);
-      const saved = localStorage.getItem('systemPassword');
-      window.location.href = saved 
-        ? `/api/agent/skill/download?password=${encodeURIComponent(saved)}` 
-        : '/api/agent/skill/download';
+      console.error('Erro no download via blob, tentando fallback direto:', err);
+      window.location.href = '/api/agent/skill/download';
     }
   };
 
   const handleCopyPrompt = () => {
-    const promptText = `Você está integrando com o AutoRPA no modo Handoff Agente.
-URL Base: ${window.location.origin}
-Endpoints essenciais:
-1. Detectar sessão: GET /api/agent/sessions
-2. Assumir controle: POST /api/agent/acquire { "runId": "<runId>" }
-3. Comandos: POST /api/agent/execute { "runId": "<runId>", "action": "eval|navigate|click|fill|screenshot|html", "params": {...} }
-4. Devolver controle: POST /api/agent/release { "runId": "<runId>" }
+    const origin = window.location.origin;
+    const promptText = `Você é um agente de IA operando o AutoRPA no modo Handoff Agente.
+Manual da Skill: ${origin}/skills/autorpa-agent-handoff/SKILL.md
+URL Base da API: ${origin}
 
-Instrução: Aguarde a pipeline pausar no passo 'agent_control', assuma a sessão, execute as ações necessárias no navegador e devolva o controle chamando /api/agent/release.`;
+Passos para assumir o controle (Acquire):
+1. Detectar sessão: GET ${origin}/api/agent/sessions
+2. Assumir controle: POST ${origin}/api/agent/acquire
+   Payload: { "runId": "<runId>" }
+3. Executar comandos: POST ${origin}/api/agent/execute
+   Payload: { "runId": "<runId>", "action": "eval|screenshot|click|fill|navigate|html", "params": {...} }
+4. Devolver controle: POST ${origin}/api/agent/release
+   Payload: { "runId": "<runId>" }
+
+Instrução: Aguarde a pipeline pausar no passo 'agent_control', envie o acquire com o runId da sessão, realize as interações necessárias e finalize com release para continuar a pipeline.`;
     navigator.clipboard.writeText(promptText);
     setCopiedPrompt(true);
     setTimeout(() => setCopiedPrompt(false), 2500);
@@ -383,6 +382,39 @@ Instrução: Aguarde a pipeline pausar no passo 'agent_control', assuma a sessã
 
               <div style={{ fontSize: '11px', color: '#cbd5e1', lineHeight: '1.4', background: 'rgba(0, 0, 0, 0.25)', padding: '8px 12px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
                 💡 Durante a pausa da pipeline, o agente externo assumirá a sessão via API REST (<code>/api/agent/acquire</code>), executará comandos (como resolver desafios visuais ou preenchimento dinâmico) e chamará <code>/api/agent/release</code> para retomar o restante da pipeline.
+              </div>
+
+              {/* Prompt Box Preview */}
+              <div
+                style={{
+                  background: '#090d16',
+                  border: '1px solid rgba(168, 85, 247, 0.35)',
+                  borderRadius: '6px',
+                  padding: '10px 12px',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '11px',
+                  color: '#e2e8f0',
+                  lineHeight: 1.5
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '4px' }}>
+                  <span style={{ color: '#c084fc', fontWeight: 600 }}>Prompt de Acquire para a IA:</span>
+                  <button
+                    type="button"
+                    onClick={handleCopyPrompt}
+                    style={{ background: 'transparent', border: 'none', color: copiedPrompt ? '#4ade80' : '#93c5fd', cursor: 'pointer', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    {copiedPrompt ? <Check size={12} /> : <Copy size={12} />}
+                    {copiedPrompt ? 'Copiado!' : 'Copiar'}
+                  </button>
+                </div>
+                <div>Você é um agente de IA operando o AutoRPA no modo Handoff Agente.</div>
+                <div><strong>Manual:</strong> <span style={{ color: '#93c5fd' }}>{window.location.origin}/skills/autorpa-agent-handoff/SKILL.md</span></div>
+                <div><strong>API Base:</strong> {window.location.origin}</div>
+                <div style={{ color: '#a78bfa', marginTop: '4px' }}>POST /api/agent/acquire &#123; "runId": "&lt;runId-da-sessao&gt;" &#125;</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '10px', marginTop: '4px' }}>
+                  * Quando a pipeline for iniciada e atingir o handoff, o ID exato da sessão (runId) será exibido na tela de logs com botão de cópia imediata.
+                </div>
               </div>
             </div>
           )}

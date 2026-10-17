@@ -125,7 +125,7 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
       newStep.output_file = '';
     }
     if (type === 'agent_control') {
-      newStep.acquireTimeout = 300;
+      newStep.acquireTimeout = 60;
       newStep.executionTimeout = 120;
     }
     if (type === 'user_prompt') {
@@ -793,13 +793,62 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
 
                           {/* Agent Control */}
                           {step.type === 'agent_control' && (
-                            <div className="step-col-full" style={{ background: 'rgba(168, 85, 247, 0.08)', border: '1px solid rgba(168, 85, 247, 0.2)', padding: '12px', borderRadius: 'var(--radius-md)' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', color: '#c084fc', fontWeight: 600 }}>
-                                <Bot size={16} /> Handoff de Controle para Agente de IA
+                            <div className="step-col-full" style={{ background: 'rgba(168, 85, 247, 0.08)', border: '1px solid rgba(168, 85, 247, 0.25)', padding: '14px', borderRadius: 'var(--radius-md)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#c084fc', fontWeight: 600, fontSize: '13px' }}>
+                                  <Bot size={16} /> Handoff de Controle para Agente de IA
+                                </div>
+                                <span className="badge" style={{ background: 'rgba(168, 85, 247, 0.2)', color: '#d8b4fe', border: '1px solid rgba(168, 85, 247, 0.4)', fontSize: '11px' }}>
+                                  Pausa para Agente Externo
+                                </span>
                               </div>
-                              <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>
-                                A pipeline pausará nesta etapa mantendo a aba do navegador aberta. Um agente externo pode se conectar via API REST (/api/agent/acquire), interagir e devolver o controle (/api/agent/release).
+                              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '14px', lineHeight: 1.4 }}>
+                                A pipeline pausará nesta etapa mantendo a aba do navegador aberta. Um agente externo pode se conectar via API REST (<code>/api/agent/acquire</code>), interagir e devolver o controle (<code>/api/agent/release</code>).
                               </p>
+
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                                <div className="form-group" style={{ margin: 0 }}>
+                                  <label style={{ fontSize: '12px', display: 'block', marginBottom: '4px', fontWeight: 600, color: 'var(--text-light)' }}>
+                                    Tempo de Espera para Conexão (Acquire Timeout)
+                                  </label>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <input
+                                      type="number"
+                                      min="5"
+                                      max="3600"
+                                      className="form-control"
+                                      placeholder="60"
+                                      value={step.acquireTimeout !== undefined ? step.acquireTimeout : 60}
+                                      onChange={e => updateStepField(index, 'acquireTimeout', parseInt(e.target.value, 10) || 60)}
+                                    />
+                                    <span style={{ fontSize: '12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>segundos</span>
+                                  </div>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginTop: '4px' }}>
+                                    Tempo máximo que a pipeline aguarda até o agente assumir o controle.
+                                  </span>
+                                </div>
+
+                                <div className="form-group" style={{ margin: 0 }}>
+                                  <label style={{ fontSize: '12px', display: 'block', marginBottom: '4px', fontWeight: 600, color: 'var(--text-light)' }}>
+                                    Tempo Limite de Execução (Execution Timeout)
+                                  </label>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <input
+                                      type="number"
+                                      min="10"
+                                      max="7200"
+                                      className="form-control"
+                                      placeholder="120"
+                                      value={step.executionTimeout !== undefined ? step.executionTimeout : 120}
+                                      onChange={e => updateStepField(index, 'executionTimeout', parseInt(e.target.value, 10) || 120)}
+                                    />
+                                    <span style={{ fontSize: '12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>segundos</span>
+                                  </div>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginTop: '4px' }}>
+                                    Tempo máximo para o agente concluir as operações e liberar a sessão.
+                                  </span>
+                                </div>
+                              </div>
                             </div>
                           )}
 

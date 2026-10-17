@@ -8,9 +8,7 @@ export default function AgentSkillModal({ onClose }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const saved = localStorage.getItem('systemPassword');
-    const headers = saved ? { 'x-system-password': saved } : {};
-    fetch('/api/agent/skill', { headers })
+    fetch('/api/agent/skill')
       .then(res => res.json())
       .then(data => {
         if (data.content) {
@@ -29,11 +27,7 @@ export default function AgentSkillModal({ onClose }) {
 
   const handleDownload = async () => {
     try {
-      const saved = localStorage.getItem('systemPassword');
-      const url = saved ? `/api/agent/skill/download?password=${encodeURIComponent(saved)}` : '/api/agent/skill/download';
-      const res = await fetch(url, {
-        headers: saved ? { 'x-system-password': saved } : {}
-      });
+      const res = await fetch('/api/agent/skill/download');
       if (!res.ok) throw new Error('Falha no download');
       const blob = await res.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
@@ -45,11 +39,8 @@ export default function AgentSkillModal({ onClose }) {
       a.remove();
       window.URL.revokeObjectURL(downloadUrl);
     } catch (err) {
-      console.error('Erro no download via blob, tentando fallback:', err);
-      const saved = localStorage.getItem('systemPassword');
-      window.location.href = saved 
-        ? `/api/agent/skill/download?password=${encodeURIComponent(saved)}` 
-        : '/api/agent/skill/download';
+      console.error('Erro no download via blob, tentando fallback direto:', err);
+      window.location.href = '/api/agent/skill/download';
     }
   };
 

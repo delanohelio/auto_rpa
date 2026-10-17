@@ -29,6 +29,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import JsonViewer from '../code/JsonViewer';
 import HtmlViewerModal from '../code/HtmlViewerModal';
+import AgentSkillModal from '../common/AgentSkillModal';
 
 export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
   const { apiFetch } = useAuth();
@@ -47,6 +48,9 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
   const [promptFormValues, setPromptFormValues] = useState({});
   const [isSubmittingPrompt, setIsSubmittingPrompt] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [copiedAgentPrompt, setCopiedAgentPrompt] = useState(false);
+  const [copiedCurl, setCopiedCurl] = useState(false);
+  const [showSkillModal, setShowSkillModal] = useState(false);
 
   // Translate click events accurately to 1280x720 accounting for object-fit: contain letterboxing
   const getRenderedImageCoordinates = (e, imgElement, naturalW = 1280, naturalH = 720) => {
@@ -119,6 +123,50 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
   const manualStep = (log?.stepsExecuted || []).find(
     s => s.status === 'running' && s.data && s.data.isManualInteraction && !s.data.completed
   );
+
+  // Find active agent handoff step
+  const agentStep = (log?.stepsExecuted || []).find(
+    s => s.status === 'running' && (s.type === 'agent_control' || s.data?.isAgentControl) && s.data?.agentStatus !== 'completed'
+  );
+
+  const handleCopyAgentPrompt = (runId) => {
+    const origin = window.location.origin;
+    const promptText = `Você é um agente de IA operando o AutoRPA no modo Handoff Agente.
+Manual da Skill: ${origin}/skills/autorpa-agent-handoff/SKILL.md
+URL Base da API: ${origin}
+ID da Sessão (runId): ${runId}
+
+A pipeline do AutoRPA pausou e está aguardando você assumir o controle do navegador!
+Passos para executar:
+1. Assumir o controle (Acquire):
+curl -X POST "${origin}/api/agent/acquire" \\
+  -H "Content-Type: application/json" \\
+  -d '{"runId": "${runId}"}'
+
+2. Executar ações no navegador (eval, click, fill, screenshot, html, navigate):
+curl -X POST "${origin}/api/agent/execute" \\
+  -H "Content-Type: application/json" \\
+  -d '{"runId": "${runId}", "action": "eval", "params": {"script": "return document.title"}}'
+
+3. Devolver o controle para o AutoRPA continuar o pipeline (Release):
+curl -X POST "${origin}/api/agent/release" \\
+  -H "Content-Type: application/json" \\
+  -d '{"runId": "${runId}"}'`;
+
+    navigator.clipboard.writeText(promptText);
+    setCopiedAgentPrompt(true);
+    toast.success('Prompt Copiado', 'Instruções e dados de acquire copiados para a área de transferência.');
+    setTimeout(() => setCopiedAgentPrompt(false), 2500);
+  };
+
+  const handleCopyCurl = (runId) => {
+    const origin = window.location.origin;
+    const curlCmd = `curl -X POST "${origin}/api/agent/acquire" -H "Content-Type: application/json" -d '{"runId":"${runId}"}'`;
+    navigator.clipboard.writeText(curlCmd);
+    setCopiedCurl(true);
+    toast.success('cURL Copiado', 'Comando curl de acquire copiado!');
+    setTimeout(() => setCopiedCurl(false), 2500);
+  };
 
   // Handle continuing manual interaction
   const handleContinueManualInteraction = async () => {
@@ -437,6 +485,108 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                   </div>
                 )}
 
+                {/* Agent Handoff Card in Left Column */}
+                {agentStep && (
+                  <div
+                    className="card mb-16"
+                    style={{
+                      border: '2px solid #a855f7',
+                      background: 'rgba(168, 85, 247, 0.08)',
+                      padding: '16px',
+                      borderRadius: 'var(--radius-md)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <h4 style={{ margin: 0, fontSize: '14px', color: '#d8b4fe', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Bot size={16} /> Handoff Agente IA Ativo
+                      </h4>
+                      <span
+                        className="badge"
+                        style={{
+                          background: agentStep.data?.agentStatus === 'acquired' ? 'rgba(59, 130, 246, 0.25)' : 'rgba(168, 85, 247, 0.25)',
+                          color: agentStep.data?.agentStatus === 'acquired' ? '#93c5fa' : '#e9d5ff',
+                          border: '1px solid #a855f7',
+                          fontSize: '10px'
+                        }}
+                      >
+                        {agentStep.data?.agentStatus === 'acquired' ? 'Sessão Assumida pela IA' : 'Aguardando Acquire'}
+                      </span>
+                    </div>
+
+                    <p style={{ fontSize: '12px', color: 'var(--text-light)', marginBottom: '8px', lineHeight: 1.4 }}>
+                      {agentStep.data?.agentStatus === 'acquired'
+                        ? 'O agente de IA está conectado e operando o navegador.'
+                        : 'A automação pausou aguardando o agente assumir a sessão.'}
+                    </p>
+
+                    <div style={{ display: 'flex', gap: '10px', marginBottom: '10px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                      <span>Sessão: <code style={{ color: '#c084fc', fontWeight: 600 }}>{log.id}</code></span>
+                      <span>Acquire: <strong>{agentStep.data?.acquireTimeout || 60}s</strong></span>
+                      <span>Execução: <strong>{agentStep.data?.executionTimeout || 120}s</strong></span>
+                    </div>
+
+                    <div
+                      style={{
+                        background: '#090d16',
+                        borderRadius: '6px',
+                        padding: '10px 12px',
+                        border: '1px solid rgba(168, 85, 247, 0.3)',
+                        marginBottom: '10px',
+                        fontSize: '11px',
+                        fontFamily: 'var(--font-mono)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', color: '#c084fc', fontWeight: 600 }}>
+                        <span>Prompt para Agente / IA:</span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyAgentPrompt(log.id)}
+                          style={{ background: 'transparent', border: 'none', color: copiedAgentPrompt ? '#4ade80' : '#93c5fd', cursor: 'pointer', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          {copiedAgentPrompt ? <Check size={12} /> : <Copy size={12} />}
+                          {copiedAgentPrompt ? 'Copiado!' : 'Copiar'}
+                        </button>
+                      </div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '10px', lineHeight: 1.4, wordBreak: 'break-all' }}>
+                        <div>POST /api/agent/acquire &#123; "runId": "{log.id}" &#125;</div>
+                        <div style={{ color: '#93c5fd', marginTop: '2px' }}>{window.location.origin}/skills/autorpa-agent-handoff/SKILL.md</div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => handleCopyAgentPrompt(log.id)}
+                        style={{ flex: 1, minWidth: '120px', justifyContent: 'center', background: '#9333ea', borderColor: '#a855f7', fontSize: '11px' }}
+                      >
+                        {copiedAgentPrompt ? <Check size={12} /> : <Copy size={12} />}
+                        Copiar Prompt
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleCopyCurl(log.id)}
+                        style={{ justifyContent: 'center', fontSize: '11px' }}
+                        title="Copiar comando cURL para executar no terminal"
+                      >
+                        {copiedCurl ? <Check size={12} /> : <Terminal size={12} />}
+                        cURL
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setShowSkillModal(true)}
+                        style={{ justifyContent: 'center', color: '#d8b4fe', borderColor: 'rgba(168, 85, 247, 0.4)', fontSize: '11px' }}
+                      >
+                        <FileText size={12} /> Skill
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Interactive Prompt Card (user_prompt) */}
                 {log.status === 'running' && (() => {
                   const promptStep = (log.stepsExecuted || []).find(
@@ -675,6 +825,10 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                       <span className="badge" style={{ background: 'rgba(168, 85, 247, 0.25)', color: '#e9d5ff', border: '1px solid #a855f7', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <MousePointer size={12} /> Interação Liberada
                       </span>
+                    ) : agentStep ? (
+                      <span className="badge" style={{ background: 'rgba(168, 85, 247, 0.25)', color: '#e9d5ff', border: '1px solid #a855f7', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <Bot size={12} /> Handoff IA {agentStep.data?.agentStatus === 'acquired' ? 'Operando' : 'Aguardando'}
+                      </span>
                     ) : log.status === 'running' ? (
                       <span className="browser-robot-badge">
                         <span className="browser-robot-badge-pulse" />
@@ -734,6 +888,56 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                       {isSubmittingPrompt ? <RefreshCw className="spin" size={14} /> : <Play size={14} style={{ fill: 'currentColor' }} />}
                       <span>Concluir Interação & Continuar</span>
                     </button>
+                  </div>
+                )}
+
+                {/* Agent Handoff Banner in Headed mode */}
+                {agentStep && (
+                  <div
+                    className="browser-interactive-banner"
+                    style={{
+                      background: 'linear-gradient(90deg, rgba(147, 51, 234, 0.2) 0%, rgba(59, 130, 246, 0.15) 100%)',
+                      borderColor: '#a855f7'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div
+                        style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '8px',
+                          background: 'rgba(168, 85, 247, 0.25)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          border: '1px solid rgba(168, 85, 247, 0.4)'
+                        }}
+                      >
+                        <Bot size={16} color="#d8b4fe" />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: '#f3e8ff' }}>
+                          Handoff Agente de IA Ativo
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {agentStep.data?.agentStatus === 'acquired'
+                            ? 'Agente conectado via API e interagindo com o navegador.'
+                            : `Aguardando conexão do agente (runId: ${log.id})...`}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <button
+                        type="button"
+                        className="btn-continue-interaction"
+                        onClick={() => handleCopyAgentPrompt(log.id)}
+                        style={{ background: '#9333ea', borderColor: '#a855f7' }}
+                      >
+                        {copiedAgentPrompt ? <Check size={14} /> : <Copy size={14} />}
+                        <span>{copiedAgentPrompt ? 'Prompt Copiado!' : 'Copiar Prompt de Acquire'}</span>
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -875,6 +1079,99 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
                     >
                       {isSubmittingPrompt ? <RefreshCw className="spin" size={14} /> : <Play size={14} style={{ fill: 'currentColor' }} />}
                       Concluir Interação & Continuar Pipeline
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Agent Handoff Card in Single Column view */}
+              {agentStep && (
+                <div
+                  className="card mb-16"
+                  style={{
+                    border: '2px solid #a855f7',
+                    background: 'rgba(168, 85, 247, 0.08)',
+                    padding: '20px',
+                    borderRadius: 'var(--radius-md)'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                    <h4 style={{ margin: 0, fontSize: '16px', color: '#c084fc', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Bot size={18} /> Handoff para Agente de IA
+                    </h4>
+                    <span className="badge" style={{ background: agentStep.data?.agentStatus === 'acquired' ? 'rgba(59, 130, 246, 0.25)' : 'rgba(168, 85, 247, 0.2)', color: agentStep.data?.agentStatus === 'acquired' ? '#93c5fa' : '#d8b4fe', border: '1px solid rgba(168, 85, 247, 0.4)', fontSize: '11px' }}>
+                      {agentStep.data?.agentStatus === 'acquired' ? 'Agente em Execução' : 'Aguardando Chamada de Acquire'}
+                    </span>
+                  </div>
+
+                  <p style={{ fontSize: '13px', color: 'var(--text-light)', marginBottom: '12px', lineHeight: 1.5 }}>
+                    Esta automação atingiu uma etapa de <strong>Handoff Agente</strong>. O navegador está mantido aberto aguardando um agente de IA (como Claude, Antigravity ou script autônomo) conectar-se via API.
+                  </p>
+
+                  <div style={{ display: 'flex', gap: '16px', marginBottom: '14px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                    <span>ID da Sessão: <code style={{ color: '#c084fc', fontWeight: 600 }}>{log.id}</code></span>
+                    <span>Tempo de Conexão: <strong>{agentStep.data?.acquireTimeout || 60}s</strong></span>
+                    <span>Tempo de Execução: <strong>{agentStep.data?.executionTimeout || 120}s</strong></span>
+                  </div>
+
+                  {/* Prompt Code Preview */}
+                  <div
+                    style={{
+                      background: '#090d16',
+                      borderRadius: '8px',
+                      padding: '12px 16px',
+                      border: '1px solid rgba(168, 85, 247, 0.35)',
+                      marginBottom: '16px',
+                      fontSize: '12px',
+                      fontFamily: 'var(--font-mono)',
+                      lineHeight: 1.5
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '6px' }}>
+                      <span style={{ color: '#c084fc', fontWeight: 600 }}>Prompt de Acquire para a IA:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyAgentPrompt(log.id)}
+                        style={{ background: 'transparent', border: 'none', color: copiedAgentPrompt ? '#4ade80' : '#93c5fd', cursor: 'pointer', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        {copiedAgentPrompt ? <Check size={13} /> : <Copy size={13} />}
+                        {copiedAgentPrompt ? 'Copiado!' : 'Copiar Prompt'}
+                      </button>
+                    </div>
+                    <div>Você é um agente de IA operando o AutoRPA no modo Handoff Agente.</div>
+                    <div><strong>Manual da Skill:</strong> <span style={{ color: '#93c5fd' }}>{window.location.origin}/skills/autorpa-agent-handoff/SKILL.md</span></div>
+                    <div><strong>ID da Sessão (runId):</strong> <span style={{ color: '#c084fc' }}>{log.id}</span></div>
+                    <div style={{ color: '#a78bfa', marginTop: '6px' }}>
+                      POST {window.location.origin}/api/agent/acquire &#123; "runId": "{log.id}" &#125;
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setShowSkillModal(true)}
+                      style={{ fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <FileText size={14} /> Ver Guia da Skill
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => handleCopyCurl(log.id)}
+                      style={{ fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      {copiedCurl ? <Check size={14} /> : <Terminal size={14} />}
+                      Copiar cURL
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => handleCopyAgentPrompt(log.id)}
+                      style={{ fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#9333ea', borderColor: '#a855f7' }}
+                    >
+                      {copiedAgentPrompt ? <Check size={14} /> : <Copy size={14} />}
+                      {copiedAgentPrompt ? 'Prompt Copiado!' : 'Copiar Prompt Completo'}
                     </button>
                   </div>
                 </div>
@@ -1092,6 +1389,11 @@ export default function LogDetailsModal({ logId, onClose, onRefreshList }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Agent Skill Modal */}
+      {showSkillModal && (
+        <AgentSkillModal onClose={() => setShowSkillModal(false)} />
       )}
     </div>
   );

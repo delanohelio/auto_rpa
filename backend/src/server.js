@@ -35,6 +35,51 @@ if (!fs.existsSync(downloadsPath)) {
 }
 app.use('/downloads', express.static(downloadsPath));
 
+// Helper to locate SKILL.md across development and docker environments
+const getSkillPath = () => {
+  const candidates = [
+    path.resolve(__dirname, '../../.agents/skills/autorpa-agent-handoff/SKILL.md'),
+    path.resolve(__dirname, '../../frontend/dist/skills/autorpa-agent-handoff/SKILL.md'),
+    path.resolve(__dirname, '../../frontend/public/skills/autorpa-agent-handoff/SKILL.md'),
+    path.resolve(process.cwd(), '.agents/skills/autorpa-agent-handoff/SKILL.md'),
+    path.resolve(process.cwd(), 'frontend/public/skills/autorpa-agent-handoff/SKILL.md')
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+};
+
+// Serve skills directory statically for public markdown access across all possible directories
+const candidateSkillDirs = [
+  path.resolve(__dirname, '../../.agents/skills'),
+  path.resolve(__dirname, '../../frontend/dist/skills'),
+  path.resolve(__dirname, '../../frontend/public/skills'),
+  path.resolve(process.cwd(), '.agents/skills'),
+  path.resolve(process.cwd(), 'frontend/public/skills')
+];
+for (const dir of candidateSkillDirs) {
+  if (fs.existsSync(dir)) {
+    app.use('/skills', express.static(dir));
+  }
+}
+
+// Explicit public direct route for SKILL.md (for autonomous agents, curl, and direct link viewing)
+app.get([
+  '/skills/autorpa-agent-handoff/SKILL.md',
+  '/skills/autorpa-agent-handoff/skill.md',
+  '/skills/autorpa-agent-handoff',
+  '/skills/SKILL.md',
+  '/skill.md'
+], (req, res) => {
+  const targetPath = getSkillPath();
+  if (!targetPath) {
+    return res.status(404).send('# AutoRPA Skill Not Found');
+  }
+  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+  res.sendFile(targetPath);
+});
+
 // --- REST API ROUTES ---
 
 // Password authentication status & verify routes
@@ -52,13 +97,14 @@ app.post('/api/auth/login', (req, res) => {
   res.status(401).json({ error: 'Senha incorreta' });
 });
 
-// Middleware to protect API routes
+// Middleware to protect API routes (exempts public agent skill docs and agent handoff APIs)
 app.use((req, res, next) => {
   if (
     SYSTEM_PASSWORD &&
     req.path.startsWith('/api/') &&
     !req.path.startsWith('/api/auth/') &&
-    !req.path.startsWith('/api/agent/skill')
+    !req.path.startsWith('/api/agent/skill') &&
+    !req.path.startsWith('/api/agent/')
   ) {
     const authHeader = req.headers['x-system-password'] || req.query.token || req.query.auth || req.query.password;
     if (authHeader !== SYSTEM_PASSWORD) {
@@ -516,6 +562,21 @@ app.post('/api/agent/acquire', (req, res) => {
     }, timeoutMs);
 
     console.log(`Agent successfully acquired control of session ${runId}. Start execution timeout timer: ${timeoutMs}ms.`);
+
+    // Update log state in database so frontend picks up status change in real time
+    try {
+      const allLogs = db.getLogs();
+      const logRecord = (Array.isArray(allLogs) ? allLogs : []).find(l => l.id === runId);
+      if (logRecord && logRecord.stepsExecuted && logRecord.stepsExecuted[session.stepIndex]) {
+        logRecord.stepsExecuted[session.stepIndex].data = {
+          ...logRecord.stepsExecuted[session.stepIndex].data,
+          agentStatus: 'acquired',
+          message: 'Agente conectado e operando o navegador via API...'
+        };
+        db.addLog(logRecord);
+      }
+    } catch (_) {}
+
     res.json({ success: true, status: 'acquired' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -543,7 +604,15 @@ app.post('/api/agent/execute', async (req, res) => {
     switch (action) {
       case 'eval':
         if (!params || !params.script) return res.status(400).json({ error: 'eval action requires params.script' });
-        result = await page.evaluate(params.script);
+        const scriptBody = params.script.trim();
+        result = await page.evaluate(async (code) => {
+          try {
+            const fn = new Function(`return (async () => { ${code} })();`);
+            return await fn();
+          } catch (fnErr) {
+            return eval(code);
+          }
+        }, scriptBody);
         break;
       case 'navigate':
         if (!params || !params.url) return res.status(400).json({ error: 'navigate action requires params.url' });
@@ -597,6 +666,20 @@ app.post('/api/agent/release', (req, res) => {
       session.executionTimeoutTimer = null;
     }
 
+    // Update log state
+    try {
+      const allLogs = db.getLogs();
+      const logRecord = (Array.isArray(allLogs) ? allLogs : []).find(l => l.id === runId);
+      if (logRecord && logRecord.stepsExecuted && logRecord.stepsExecuted[session.stepIndex]) {
+        logRecord.stepsExecuted[session.stepIndex].data = {
+          ...logRecord.stepsExecuted[session.stepIndex].data,
+          agentStatus: 'completed',
+          message: 'Controle do agente finalizado com sucesso.'
+        };
+        db.addLog(logRecord);
+      }
+    } catch (_) {}
+
     // Delete session and resolve promise
     activeControlSessions.delete(runId);
     session.resolvePromise();
@@ -611,8 +694,8 @@ app.post('/api/agent/release', (req, res) => {
 // GET /api/agent/skill - Retrieve Agent Handoff skill documentation
 app.get('/api/agent/skill', (req, res) => {
   try {
-    const skillPath = path.resolve(__dirname, '../../.agents/skills/autorpa-agent-handoff/SKILL.md');
-    if (!fs.existsSync(skillPath)) {
+    const skillPath = getSkillPath();
+    if (!skillPath || !fs.existsSync(skillPath)) {
       return res.status(404).json({ error: 'Skill documentation not found' });
     }
     const content = fs.readFileSync(skillPath, 'utf8');
@@ -629,8 +712,8 @@ app.get('/api/agent/skill', (req, res) => {
 // GET /api/agent/skill/download - Direct file download of SKILL.md
 app.get('/api/agent/skill/download', (req, res) => {
   try {
-    const skillPath = path.resolve(__dirname, '../../.agents/skills/autorpa-agent-handoff/SKILL.md');
-    if (!fs.existsSync(skillPath)) {
+    const skillPath = getSkillPath();
+    if (!skillPath || !fs.existsSync(skillPath)) {
       return res.status(404).json({ error: 'Skill file not found' });
     }
     res.setHeader('Content-Disposition', 'attachment; filename="autorpa-agent-handoff.skill.md"');
@@ -912,9 +995,14 @@ if (fs.existsSync(frontendDistPath)) {
   console.log(`Production Mode: Serving client assets from ${frontendDistPath}`);
   app.use(express.static(frontendDistPath));
   
-  // Catch-all route to serve the SPA client for deep routes (except API/screenshots/downloads)
+  // Catch-all route to serve the SPA client for deep routes (except API/screenshots/downloads/skills)
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/screenshots') || req.path.startsWith('/downloads')) {
+    if (
+      req.path.startsWith('/api') ||
+      req.path.startsWith('/screenshots') ||
+      req.path.startsWith('/downloads') ||
+      req.path.startsWith('/skills')
+    ) {
       return next();
     }
     res.sendFile(path.join(frontendDistPath, 'index.html'));

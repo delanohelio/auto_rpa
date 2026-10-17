@@ -970,7 +970,14 @@ export async function runTask(
               console.log(`Pipeline paused. Waiting for external agent control (acquire timeout: ${acquireTimeoutSec}s, execution timeout: ${executionTimeoutSec}s)...`);
 
               stepLog.status = 'running';
-              stepLog.data = { message: 'Aguardando agente assumir o controle...' };
+              stepLog.data = {
+                message: 'Aguardando agente assumir o controle...',
+                isAgentControl: true,
+                runId,
+                acquireTimeout: acquireTimeoutSec,
+                executionTimeout: executionTimeoutSec,
+                agentStatus: 'waiting'
+              };
               db.addLog(logRecord); // Write log state so the UI picks it up
 
               await new Promise((resolve, reject) => {
@@ -999,7 +1006,11 @@ export async function runTask(
                 session.executionTimeoutMs = executionTimeoutSec * 1000;
               });
               
-              stepLog.data = { message: 'Controle do agente finalizado com sucesso.' };
+              stepLog.data = {
+                ...stepLog.data,
+                message: 'Controle do agente finalizado com sucesso.',
+                agentStatus: 'completed'
+              };
               console.log('Agent control finished. Resuming pipeline execution...');
               break;
             }

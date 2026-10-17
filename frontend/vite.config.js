@@ -16,6 +16,16 @@ export default defineConfig({
         target: 'http://localhost:3000',
         changeOrigin: true,
         secure: false
+      },
+      '/downloads': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        secure: false
+      },
+      '/skills': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        secure: false
       }
     }
   }

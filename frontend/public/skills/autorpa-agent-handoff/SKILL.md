@@ -55,7 +55,7 @@ sequenceDiagram
 
 ## 📡 Especificação Completa dos Endpoints
 
-A URL base padrão é `http://localhost:3000`.
+A URL base padrão é `https://rpa.sarapatel.duckdns.org`.
 
 ### 1. Listar Sessões Aguardando Controle
 - **Método**: `GET /api/agent/sessions`
