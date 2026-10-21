@@ -752,6 +752,166 @@ curl -X POST "${origin}/api/agent/release" \\
                             </div>
                           )}
 
+                          {/* Dedicated HTTP Request Result Card */}
+                          {step.type === 'http_request' && step.data && (
+                            <div
+                              style={{
+                                marginTop: '8px',
+                                background: 'rgba(6, 182, 212, 0.06)',
+                                border: `1px solid ${step.data.ok ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+                                borderRadius: 'var(--radius-md)',
+                                padding: '10px'
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px', flexWrap: 'wrap', gap: '6px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <Globe size={13} color="#22d3ee" />
+                                  <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#22d3ee' }}>
+                                    {step.data.method || 'GET'}
+                                  </span>
+                                  <span
+                                    className="badge"
+                                    style={{
+                                      fontSize: '10px',
+                                      background: step.data.ok ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                                      color: step.data.ok ? '#34d399' : '#f87171',
+                                      border: `1px solid ${step.data.ok ? '#10b981' : '#ef4444'}`
+                                    }}
+                                  >
+                                    {step.data.status} {step.data.statusText || ''}
+                                  </span>
+                                  {step.data.durationMs !== undefined && (
+                                    <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                                      ({step.data.durationMs}ms)
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  {step.data.savedToVars && (
+                                    <span style={{ fontSize: '10px', color: '#93c5fd', background: 'rgba(59, 130, 246, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                                      Salvo em: <strong>vars.{step.data.savedToVars}</strong>
+                                    </span>
+                                  )}
+                                  {step.downloadPath && (
+                                    <a
+                                      href={step.downloadPath}
+                                      download
+                                      className="btn btn-secondary btn-sm"
+                                      style={{ padding: '2px 6px', fontSize: '10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                    >
+                                      <Download size={11} /> Baixar
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', marginBottom: '8px', wordBreak: 'break-all' }}>
+                                {step.data.url}
+                              </div>
+
+                              {typeof step.data.data === 'object' && step.data.data !== null ? (
+                                <JsonViewer data={step.data.data} title="Resposta JSON" maxHeight="160px" />
+                              ) : (
+                                <pre
+                                  style={{
+                                    margin: 0,
+                                    padding: '8px',
+                                    background: 'rgba(0, 0, 0, 0.4)',
+                                    borderRadius: '4px',
+                                    fontFamily: 'var(--font-mono)',
+                                    fontSize: '11px',
+                                    whiteSpace: 'pre-wrap',
+                                    maxHeight: '160px',
+                                    overflowY: 'auto'
+                                  }}
+                                >
+                                  {step.data.raw || String(step.data.data || '')}
+                                </pre>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Dedicated HTTP Request Result Card */}
+                          {step.type === 'http_request' && step.data && (
+                            <div
+                              style={{
+                                marginTop: '12px',
+                                background: 'rgba(6, 182, 212, 0.06)',
+                                border: `1px solid ${step.data.ok ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+                                borderRadius: 'var(--radius-md)',
+                                padding: '12px 14px'
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <Globe size={15} color="#22d3ee" />
+                                  <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: '12px', color: '#22d3ee' }}>
+                                    {step.data.method || 'GET'}
+                                  </span>
+                                  <span
+                                    className="badge"
+                                    style={{
+                                      fontSize: '11px',
+                                      background: step.data.ok ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                                      color: step.data.ok ? '#34d399' : '#f87171',
+                                      border: `1px solid ${step.data.ok ? '#10b981' : '#ef4444'}`
+                                    }}
+                                  >
+                                    {step.data.status} {step.data.statusText || ''}
+                                  </span>
+                                  {step.data.durationMs !== undefined && (
+                                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                      ({step.data.durationMs}ms)
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  {step.data.savedToVars && (
+                                    <span style={{ fontSize: '11px', color: '#93c5fd', background: 'rgba(59, 130, 246, 0.15)', padding: '3px 8px', borderRadius: '4px' }}>
+                                      Salvo em: <strong>vars.{step.data.savedToVars}</strong>
+                                    </span>
+                                  )}
+                                  {step.downloadPath && (
+                                    <a
+                                      href={step.downloadPath}
+                                      download
+                                      className="btn btn-secondary btn-sm"
+                                      style={{ padding: '3px 8px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                                    >
+                                      <Download size={12} /> Baixar Arquivo
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', marginBottom: '10px', wordBreak: 'break-all' }}>
+                                {step.data.url}
+                              </div>
+
+                              {typeof step.data.data === 'object' && step.data.data !== null ? (
+                                <JsonViewer data={step.data.data} title="Resposta Estruturada (JSON)" maxHeight="220px" />
+                              ) : (
+                                <pre
+                                  style={{
+                                    margin: 0,
+                                    padding: '10px 12px',
+                                    background: 'rgba(0, 0, 0, 0.4)',
+                                    borderRadius: 'var(--radius-sm)',
+                                    fontFamily: 'var(--font-mono)',
+                                    fontSize: '12px',
+                                    whiteSpace: 'pre-wrap',
+                                    maxHeight: '220px',
+                                    overflowY: 'auto'
+                                  }}
+                                >
+                                  {step.data.raw || String(step.data.data || '')}
+                                </pre>
+                              )}
+                            </div>
+                          )}
+
                           {/* User JS Logs Viewer */}
                           {((step.userLogs?.length > 0) || (step.data?.userLogs?.length > 0)) && (
                             <div

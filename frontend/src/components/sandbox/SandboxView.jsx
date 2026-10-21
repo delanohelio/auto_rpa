@@ -474,6 +474,18 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
       newStep.instruction = 'Realize as ações necessárias com o mouse e teclado na janela do navegador e depois clique em Continuar.';
       newStep.timeout = 600;
     }
+    if (type === 'http_request') {
+      newStep.method = 'GET';
+      newStep.url = 'https://api.exemplo.com/dados';
+      newStep.queryParams = [];
+      newStep.headers = [{ key: 'Accept', value: 'application/json', enabled: true }];
+      newStep.bodyType = 'json';
+      newStep.body = '';
+      newStep.response_var = 'resposta_http';
+      newStep.fail_on_error = true;
+      newStep.timeout = 30;
+      newStep.output_file = '';
+    }
 
     setSteps(prev => {
       const copy = [...prev];
@@ -490,7 +502,7 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
       return copy;
     });
 
-    const stepLabel = type === 'manual_interaction' ? 'Interação Manual' : type;
+    const stepLabel = type === 'manual_interaction' ? 'Interação Manual' : type === 'http_request' ? 'Requisição HTTP' : type;
     toast.success('Ação Adicionada', `Ação "${stepLabel}" inserida com sucesso.`);
   };
 
@@ -632,6 +644,8 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
         return `Prompt: ${step.message || 'Variáveis'}`;
       case 'agent_control':
         return `Handoff IA: ${(step.instruction || '').substring(0, 30)}...`;
+      case 'http_request':
+        return `HTTP ${step.method || 'GET'}: ${step.url || 'URL não informada'}`;
       default:
         return `Ação: ${step.type}`;
     }
@@ -1226,6 +1240,15 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
                   style={{ borderLeft: '1px solid rgba(168, 85, 247, 0.3)', background: 'rgba(168, 85, 247, 0.08)' }}
                 >
                   <MousePointerClick size={12} color="#c084fc" /> + Interação Manual
+                </button>
+                <button
+                  type="button"
+                  className="palette-btn"
+                  onClick={() => addStep('http_request')}
+                  title="Executar requisição HTTP REST / Webhook com parâmetros e headers dinâmicos"
+                  style={{ borderLeft: '1px solid rgba(6, 182, 212, 0.3)', background: 'rgba(6, 182, 212, 0.08)' }}
+                >
+                  <Globe size={12} color="#22d3ee" /> + Req. HTTP
                 </button>
               </div>
 
@@ -1949,8 +1972,87 @@ export default function SandboxView({ initialData = null, onClearInitialData = n
                           </div>
                         )}
 
+                        {/* HTTP Request Step */}
+                        {step.type === 'http_request' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <div style={{ width: '100px' }}>
+                                <label style={{ fontSize: '11px' }}>Método</label>
+                                <select
+                                  className="form-control"
+                                  style={{
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    color: (step.method === 'GET' ? '#10b981' : step.method === 'POST' ? '#3b82f6' : step.method === 'PUT' ? '#f59e0b' : step.method === 'DELETE' ? '#ef4444' : '#22d3ee')
+                                  }}
+                                  value={step.method || 'GET'}
+                                  onChange={e => updateStep(index, 'method', e.target.value)}
+                                >
+                                  <option value="GET">GET</option>
+                                  <option value="POST">POST</option>
+                                  <option value="PUT">PUT</option>
+                                  <option value="PATCH">PATCH</option>
+                                  <option value="DELETE">DELETE</option>
+                                  <option value="HEAD">HEAD</option>
+                                  <option value="OPTIONS">OPTIONS</option>
+                                </select>
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <label style={{ fontSize: '11px' }}>URL</label>
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}
+                                  placeholder="https://api.exemplo.com/dados"
+                                  value={step.url || ''}
+                                  onChange={e => updateStep(index, 'url', e.target.value)}
+                                />
+                              </div>
+                            </div>
+
+                            {['POST', 'PUT', 'PATCH'].includes(step.method) && (
+                              <div>
+                                <label style={{ fontSize: '11px' }}>Corpo / Payload (JSON ou Texto)</label>
+                                <textarea
+                                  className="form-control"
+                                  rows={3}
+                                  style={{ fontSize: '11px', fontFamily: 'var(--font-mono)' }}
+                                  placeholder={`{\n  "chave": "valor"\n}`}
+                                  value={step.body || ''}
+                                  onChange={e => updateStep(index, 'body', e.target.value)}
+                                />
+                              </div>
+                            )}
+
+                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                              <div style={{ flex: 1 }}>
+                                <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Salvar retorno em (vars):</label>
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  style={{ fontSize: '11px', padding: '3px 6px', fontFamily: 'var(--font-mono)' }}
+                                  placeholder="resposta_http"
+                                  value={step.response_var || 'resposta_http'}
+                                  onChange={e => updateStep(index, 'response_var', e.target.value)}
+                                />
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingTop: '16px' }}>
+                                <input
+                                  type="checkbox"
+                                  id={`sb_fail_${index}`}
+                                  checked={step.fail_on_error !== false}
+                                  onChange={e => updateStep(index, 'fail_on_error', e.target.checked)}
+                                />
+                                <label htmlFor={`sb_fail_${index}`} style={{ fontSize: '10px', margin: 0, cursor: 'pointer' }}>
+                                  Falhar se HTTP ≥ 400
+                                </label>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
                         {/* Fallback for any other custom step */}
-                        {!['navigate', 'click', 'type', 'select', 'wait', 'keypress', 'eval', 'dynamic_script', 'list_elements', 'screenshot', 'conditional_if', 'extract_html', 'user_prompt', 'agent_control', 'manual_interaction'].includes(step.type) && (
+                        {!['navigate', 'click', 'type', 'select', 'wait', 'keypress', 'eval', 'dynamic_script', 'list_elements', 'screenshot', 'conditional_if', 'extract_html', 'user_prompt', 'agent_control', 'manual_interaction', 'http_request'].includes(step.type) && (
                           <div>
                             <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Configuração da Ação ({step.type})</label>
                             <pre style={{ margin: 0, padding: '8px', background: 'rgba(0,0,0,0.3)', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-mono)' }}>

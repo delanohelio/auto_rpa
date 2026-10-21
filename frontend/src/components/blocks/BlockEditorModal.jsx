@@ -16,7 +16,8 @@ import {
   Check,
   X,
   Shield,
-  MousePointerClick
+  MousePointerClick,
+  Globe
 } from 'lucide-react';
 import CodeEditor from '../code/CodeEditor';
 import CodeViewer from '../code/CodeViewer';
@@ -64,6 +65,67 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
   const [editParamDefault, setEditParamDefault] = useState('');
   const [editParamDesc, setEditParamDesc] = useState('');
   const [showJsDocsModal, setShowJsDocsModal] = useState(false);
+
+  // HTTP Request steps UI state
+  const [httpStepTabs, setHttpStepTabs] = useState({});
+  const getHttpTab = (stepIdx) => httpStepTabs[stepIdx] || 'params';
+  const setHttpTab = (stepIdx, tab) => setHttpStepTabs(prev => ({ ...prev, [stepIdx]: tab }));
+
+  const addHttpQueryParam = (stepIdx) => {
+    setEditingBlock(prev => {
+      const nextSteps = [...prev.steps];
+      const qp = [...(nextSteps[stepIdx].queryParams || []), { key: '', value: '', enabled: true }];
+      nextSteps[stepIdx] = { ...nextSteps[stepIdx], queryParams: qp };
+      return { ...prev, steps: nextSteps };
+    });
+  };
+
+  const updateHttpQueryParam = (stepIdx, qpIdx, field, val) => {
+    setEditingBlock(prev => {
+      const nextSteps = [...prev.steps];
+      const qp = [...(nextSteps[stepIdx].queryParams || [])];
+      qp[qpIdx] = { ...qp[qpIdx], [field]: val };
+      nextSteps[stepIdx] = { ...nextSteps[stepIdx], queryParams: qp };
+      return { ...prev, steps: nextSteps };
+    });
+  };
+
+  const removeHttpQueryParam = (stepIdx, qpIdx) => {
+    setEditingBlock(prev => {
+      const nextSteps = [...prev.steps];
+      const qp = (nextSteps[stepIdx].queryParams || []).filter((_, i) => i !== qpIdx);
+      nextSteps[stepIdx] = { ...nextSteps[stepIdx], queryParams: qp };
+      return { ...prev, steps: nextSteps };
+    });
+  };
+
+  const addHttpHeader = (stepIdx, key = '', value = '') => {
+    setEditingBlock(prev => {
+      const nextSteps = [...prev.steps];
+      const hdrs = [...(nextSteps[stepIdx].headers || []), { key, value, enabled: true }];
+      nextSteps[stepIdx] = { ...nextSteps[stepIdx], headers: hdrs };
+      return { ...prev, steps: nextSteps };
+    });
+  };
+
+  const updateHttpHeader = (stepIdx, hdrIdx, field, val) => {
+    setEditingBlock(prev => {
+      const nextSteps = [...prev.steps];
+      const hdrs = [...(nextSteps[stepIdx].headers || [])];
+      hdrs[hdrIdx] = { ...hdrs[hdrIdx], [field]: val };
+      nextSteps[stepIdx] = { ...nextSteps[stepIdx], headers: hdrs };
+      return { ...prev, steps: nextSteps };
+    });
+  };
+
+  const removeHttpHeader = (stepIdx, hdrIdx) => {
+    setEditingBlock(prev => {
+      const nextSteps = [...prev.steps];
+      const hdrs = (nextSteps[stepIdx].headers || []).filter((_, i) => i !== hdrIdx);
+      nextSteps[stepIdx] = { ...nextSteps[stepIdx], headers: hdrs };
+      return { ...prev, steps: nextSteps };
+    });
+  };
 
   const handleNewParamTypeChange = (type) => {
     setNewParamType(type);
@@ -138,6 +200,20 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
     if (type === 'manual_interaction') {
       newStep.instruction = 'Realize as ações necessárias com o mouse e teclado na janela do navegador e depois clique em Continuar.';
       newStep.timeout = 600;
+    }
+    if (type === 'http_request') {
+      newStep.method = 'GET';
+      newStep.url = 'https://api.exemplo.com/dados';
+      newStep.queryParams = [];
+      newStep.headers = [
+        { key: 'Accept', value: 'application/json', enabled: true }
+      ];
+      newStep.bodyType = 'json';
+      newStep.body = '';
+      newStep.response_var = 'resposta_http';
+      newStep.fail_on_error = true;
+      newStep.timeout = 30;
+      newStep.output_file = '';
     }
 
     setEditingBlock(prev => ({
@@ -444,6 +520,9 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                     <button type="button" className="btn btn-secondary btn-sm" style={{ borderColor: 'rgba(192, 132, 252, 0.5)', color: '#c084fc', background: 'rgba(168, 85, 247, 0.08)' }} onClick={() => addStep('manual_interaction')}>
                       <MousePointerClick size={12} /> + Interação Manual
                     </button>
+                    <button type="button" className="btn btn-secondary btn-sm" style={{ borderColor: '#06b6d4', color: '#22d3ee', background: 'rgba(6, 182, 212, 0.08)' }} onClick={() => addStep('http_request')}>
+                      <Globe size={12} /> + Requisição HTTP
+                    </button>
                   </div>
                 </div>
 
@@ -473,6 +552,7 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                               {step.type === 'agent_control' && 'Handoff para Agente de IA'}
                               {step.type === 'user_prompt' && 'Prompt Interativo de Variáveis'}
                               {step.type === 'manual_interaction' && 'Interação Manual do Usuário (Mouse / Teclado)'}
+                              {step.type === 'http_request' && `Requisição HTTP (${step.method || 'GET'})`}
                             </span>
                           </h4>
 
@@ -901,6 +981,422 @@ export default function BlockEditorModal({ block, onSave, onClose }) {
                               <div style={{ marginTop: '8px', fontSize: '11px', color: '#a78bfa' }}>
                                 💡 Ao atingir esta etapa durante o pipeline, a execução pausará e o navegador Playwright abrirá com janela visível na tela. O operador poderá interagir livremente com mouse/teclado e, ao terminar, clicar no botão "Continuar".
                               </div>
+                            </div>
+                          )}
+
+                          {/* HTTP Request Step */}
+                          {step.type === 'http_request' && (
+                            <div className="step-col-full" style={{ background: 'rgba(6, 182, 212, 0.04)', border: '1px solid rgba(6, 182, 212, 0.25)', padding: '16px', borderRadius: 'var(--radius-md)' }}>
+                              {/* Header info badge */}
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#22d3ee', fontWeight: 600, fontSize: '13px' }}>
+                                  <Globe size={16} /> Requisição HTTP / REST API
+                                </div>
+                                <span className="badge" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#67e8f9', border: '1px solid rgba(6, 182, 212, 0.3)', fontSize: '11px' }}>
+                                  Integração Externa
+                                </span>
+                              </div>
+
+                              {/* Method & URL Row */}
+                              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '14px' }}>
+                                <div style={{ width: '130px', flexShrink: 0 }}>
+                                  <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px', fontWeight: 600, color: 'var(--text-muted)' }}>Método</label>
+                                  <select
+                                    className="form-control"
+                                    style={{
+                                      fontWeight: 700,
+                                      fontFamily: 'var(--font-mono)',
+                                      color: (step.method === 'GET' ? '#10b981' : step.method === 'POST' ? '#3b82f6' : step.method === 'PUT' ? '#f59e0b' : step.method === 'PATCH' ? '#a855f7' : step.method === 'DELETE' ? '#ef4444' : '#22d3ee'),
+                                      borderColor: (step.method === 'GET' ? '#10b981' : step.method === 'POST' ? '#3b82f6' : step.method === 'PUT' ? '#f59e0b' : step.method === 'PATCH' ? '#a855f7' : step.method === 'DELETE' ? '#ef4444' : '#22d3ee')
+                                    }}
+                                    value={step.method || 'GET'}
+                                    onChange={e => updateStepField(index, 'method', e.target.value)}
+                                  >
+                                    <option value="GET">GET</option>
+                                    <option value="POST">POST</option>
+                                    <option value="PUT">PUT</option>
+                                    <option value="PATCH">PATCH</option>
+                                    <option value="DELETE">DELETE</option>
+                                    <option value="HEAD">HEAD</option>
+                                    <option value="OPTIONS">OPTIONS</option>
+                                  </select>
+                                </div>
+
+                                <div style={{ flex: 1 }}>
+                                  <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px', fontWeight: 600, color: 'var(--text-muted)' }}>
+                                    URL de Destino (aceita <code>{'{{param:nome}}'}</code>, <code>{'{{secret:chave}}'}</code> ou <code>{'{{variavel}}'}</code>)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    className="form-control"
+                                    style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+                                    placeholder="https://api.exemplo.com/v1/recurso ou {{param:api_url}}"
+                                    value={step.url || ''}
+                                    onChange={e => updateStepField(index, 'url', e.target.value)}
+                                  />
+                                </div>
+                              </div>
+
+                              {/* HTTP Subtabs */}
+                              <div style={{ display: 'flex', gap: '6px', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', paddingBottom: '8px', marginBottom: '14px' }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  style={{
+                                    background: getHttpTab(index) === 'params' ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
+                                    color: getHttpTab(index) === 'params' ? '#22d3ee' : 'var(--text-muted)',
+                                    borderColor: getHttpTab(index) === 'params' ? '#06b6d4' : 'transparent',
+                                    fontSize: '11px',
+                                    padding: '4px 10px'
+                                  }}
+                                  onClick={() => setHttpTab(index, 'params')}
+                                >
+                                  Query Params ({(step.queryParams || []).length})
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  style={{
+                                    background: getHttpTab(index) === 'headers' ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
+                                    color: getHttpTab(index) === 'headers' ? '#22d3ee' : 'var(--text-muted)',
+                                    borderColor: getHttpTab(index) === 'headers' ? '#06b6d4' : 'transparent',
+                                    fontSize: '11px',
+                                    padding: '4px 10px'
+                                  }}
+                                  onClick={() => setHttpTab(index, 'headers')}
+                                >
+                                  Headers ({(step.headers || []).length})
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  style={{
+                                    background: getHttpTab(index) === 'body' ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
+                                    color: getHttpTab(index) === 'body' ? '#22d3ee' : 'var(--text-muted)',
+                                    borderColor: getHttpTab(index) === 'body' ? '#06b6d4' : 'transparent',
+                                    fontSize: '11px',
+                                    padding: '4px 10px'
+                                  }}
+                                  onClick={() => setHttpTab(index, 'body')}
+                                >
+                                  Body / Payload {['POST', 'PUT', 'PATCH'].includes(step.method) && step.body ? '●' : ''}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  style={{
+                                    background: getHttpTab(index) === 'options' ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
+                                    color: getHttpTab(index) === 'options' ? '#22d3ee' : 'var(--text-muted)',
+                                    borderColor: getHttpTab(index) === 'options' ? '#06b6d4' : 'transparent',
+                                    fontSize: '11px',
+                                    padding: '4px 10px'
+                                  }}
+                                  onClick={() => setHttpTab(index, 'options')}
+                                >
+                                  Variáveis & Retorno
+                                </button>
+                              </div>
+
+                              {/* TAB 1: QUERY PARAMS */}
+                              {getHttpTab(index) === 'params' && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                      Parâmetros adicionados à URL (ex: <code>?chave=valor</code>). Aceita variáveis diretas como <code>{'{{param:termo}}'}</code>.
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      style={{ fontSize: '11px', padding: '3px 8px' }}
+                                      onClick={() => addHttpQueryParam(index)}
+                                    >
+                                      <Plus size={11} /> Adicionar Parâmetro
+                                    </button>
+                                  </div>
+
+                                  {(step.queryParams || []).length === 0 ? (
+                                    <div style={{ padding: '16px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '6px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                                      Nenhum query param configurado. Clique em "Adicionar Parâmetro" acima se precisar passar parâmetros na query string.
+                                    </div>
+                                  ) : (
+                                    (step.queryParams || []).map((qp, qpIdx) => (
+                                      <div key={qpIdx} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                        <input
+                                          type="checkbox"
+                                          title="Ativo"
+                                          checked={qp.enabled !== false}
+                                          onChange={e => updateHttpQueryParam(index, qpIdx, 'enabled', e.target.checked)}
+                                          style={{ cursor: 'pointer' }}
+                                        />
+                                        <input
+                                          type="text"
+                                          className="form-control"
+                                          placeholder="Parâmetro (ex: search)"
+                                          style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: '11px' }}
+                                          value={qp.key || ''}
+                                          onChange={e => updateHttpQueryParam(index, qpIdx, 'key', e.target.value)}
+                                        />
+                                        <input
+                                          type="text"
+                                          className="form-control"
+                                          placeholder="Valor (ex: {{param:termo}})"
+                                          style={{ flex: 2, fontFamily: 'var(--font-mono)', fontSize: '11px' }}
+                                          value={qp.value || ''}
+                                          onChange={e => updateHttpQueryParam(index, qpIdx, 'value', e.target.value)}
+                                        />
+                                        <button
+                                          type="button"
+                                          className="btn btn-danger btn-sm"
+                                          style={{ padding: '4px 8px' }}
+                                          onClick={() => removeHttpQueryParam(index, qpIdx)}
+                                          title="Excluir parâmetro"
+                                        >
+                                          <Trash2 size={12} />
+                                        </button>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              )}
+
+                              {/* TAB 2: HEADERS */}
+                              {getHttpTab(index) === 'headers' && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Atalhos:</span>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        style={{ fontSize: '10px', padding: '2px 6px' }}
+                                        onClick={() => addHttpHeader(index, 'Content-Type', 'application/json')}
+                                      >
+                                        + application/json
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        style={{ fontSize: '10px', padding: '2px 6px' }}
+                                        onClick={() => addHttpHeader(index, 'Authorization', 'Bearer {{secret:api_token}}')}
+                                      >
+                                        + Bearer Token
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        style={{ fontSize: '10px', padding: '2px 6px' }}
+                                        onClick={() => addHttpHeader(index, 'Accept', 'application/json')}
+                                      >
+                                        + Accept: JSON
+                                      </button>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      style={{ fontSize: '11px', padding: '3px 8px' }}
+                                      onClick={() => addHttpHeader(index, '', '')}
+                                    >
+                                      <Plus size={11} /> Adicionar Header
+                                    </button>
+                                  </div>
+
+                                  {(step.headers || []).length === 0 ? (
+                                    <div style={{ padding: '16px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '6px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                                      Nenhum cabeçalho customizado configurado.
+                                    </div>
+                                  ) : (
+                                    (step.headers || []).map((hdr, hdrIdx) => (
+                                      <div key={hdrIdx} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                        <input
+                                          type="checkbox"
+                                          title="Ativo"
+                                          checked={hdr.enabled !== false}
+                                          onChange={e => updateHttpHeader(index, hdrIdx, 'enabled', e.target.checked)}
+                                          style={{ cursor: 'pointer' }}
+                                        />
+                                        <input
+                                          type="text"
+                                          className="form-control"
+                                          placeholder="Header (ex: Authorization)"
+                                          style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: '11px' }}
+                                          value={hdr.key || ''}
+                                          onChange={e => updateHttpHeader(index, hdrIdx, 'key', e.target.value)}
+                                        />
+                                        <input
+                                          type="text"
+                                          className="form-control"
+                                          placeholder="Valor (ex: Bearer {{secret:api_key}})"
+                                          style={{ flex: 2, fontFamily: 'var(--font-mono)', fontSize: '11px' }}
+                                          value={hdr.value || ''}
+                                          onChange={e => updateHttpHeader(index, hdrIdx, 'value', e.target.value)}
+                                        />
+                                        <button
+                                          type="button"
+                                          className="btn btn-danger btn-sm"
+                                          style={{ padding: '4px 8px' }}
+                                          onClick={() => removeHttpHeader(index, hdrIdx)}
+                                          title="Excluir cabeçalho"
+                                        >
+                                          <Trash2 size={12} />
+                                        </button>
+                                      </div>
+                                    ))
+                                  )}
+                                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                    🔒 <em>Secrets usadas em cabeçalhos (ex: <code>{'{{secret:api_token}}'}</code>) são automaticamente mascaradas nos logs.</em>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* TAB 3: BODY / PAYLOAD */}
+                              {getHttpTab(index) === 'body' && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                  {(step.method === 'GET' || step.method === 'HEAD') && (
+                                    <div style={{ padding: '8px 12px', background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)', borderRadius: '6px', fontSize: '11px', color: '#fde047' }}>
+                                      ⚠️ Métodos <strong>{step.method}</strong> tipicamente não devem enviar payload no corpo da requisição. Se precisar enviar dados, altere o método para POST, PUT ou PATCH.
+                                    </div>
+                                  )}
+
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                      <label style={{ fontSize: '11px', margin: 0, fontWeight: 600 }}>Tipo de Corpo:</label>
+                                      <select
+                                        className="form-control"
+                                        style={{ fontSize: '11px', padding: '3px 8px', width: 'auto' }}
+                                        value={step.bodyType || 'json'}
+                                        onChange={e => updateStepField(index, 'bodyType', e.target.value)}
+                                      >
+                                        <option value="json">JSON (application/json)</option>
+                                        <option value="text">Texto / Raw</option>
+                                        <option value="none">Nenhum (Vazio)</option>
+                                      </select>
+                                    </div>
+
+                                    {step.bodyType === 'json' && step.body && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        style={{ fontSize: '10px', padding: '2px 8px' }}
+                                        onClick={() => {
+                                          try {
+                                            const parsed = JSON.parse(step.body);
+                                            updateStepField(index, 'body', JSON.stringify(parsed, null, 2));
+                                          } catch (err) {
+                                            // might contain interpolation variables, ignore format error
+                                          }
+                                        }}
+                                      >
+                                        Formatar JSON
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {step.bodyType !== 'none' && (
+                                    <div>
+                                      <textarea
+                                        className="form-control"
+                                        rows={6}
+                                        style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', lineHeight: 1.4, resize: 'vertical' }}
+                                        placeholder={`{\n  "nome": "{{param:cliente}}",\n  "status": "ativo",\n  "token": "{{secret:chave}}"\n}`}
+                                        value={step.body || ''}
+                                        onChange={e => updateStepField(index, 'body', e.target.value)}
+                                      />
+                                      <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                                        Dica: Você pode interpolar qualquer parâmetro ou variável anterior diretamente no JSON: <code>{'{ "id": "{{param:usuario_id}}", "valor": {{param:total}} }'}</code>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* TAB 4: OPTIONS & RETURN */}
+                              {getHttpTab(index) === 'options' && (
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                    <div>
+                                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px', fontWeight: 600, color: 'var(--text-light)' }}>
+                                        Nome da Variável de Retorno (VARS)
+                                      </label>
+                                      <input
+                                        type="text"
+                                        className="form-control"
+                                        style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+                                        placeholder="resposta_http"
+                                        value={step.response_var || 'resposta_http'}
+                                        onChange={e => updateStepField(index, 'response_var', e.target.value)}
+                                      />
+                                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginTop: '4px' }}>
+                                        Disponível nos próximos blocos como <code>{'{{' + (step.response_var || 'resposta_http') + '.campo}}'}</code>.
+                                      </span>
+                                    </div>
+
+                                    <div>
+                                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px', fontWeight: 600, color: 'var(--text-light)' }}>
+                                        Timeout Máximo da Requisição (segundos)
+                                      </label>
+                                      <input
+                                        type="number"
+                                        className="form-control"
+                                        min="1"
+                                        max="300"
+                                        placeholder="30"
+                                        value={step.timeout || 30}
+                                        onChange={e => updateStepField(index, 'timeout', parseInt(e.target.value, 10) || 30)}
+                                      />
+                                    </div>
+
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                                      <input
+                                        type="checkbox"
+                                        id={`fail_error_${index}`}
+                                        checked={step.fail_on_error !== false}
+                                        onChange={e => updateStepField(index, 'fail_on_error', e.target.checked)}
+                                        style={{ cursor: 'pointer' }}
+                                      />
+                                      <label htmlFor={`fail_error_${index}`} style={{ fontSize: '11px', cursor: 'pointer', margin: 0, fontWeight: 500 }}>
+                                        Interromper pipeline se o status for de erro (HTTP ≥ 400)
+                                      </label>
+                                    </div>
+
+                                    <div>
+                                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px', fontWeight: 600, color: 'var(--text-light)' }}>
+                                        Salvar Resposta em Arquivo (Download Opcional)
+                                      </label>
+                                      <input
+                                        type="text"
+                                        className="form-control"
+                                        placeholder="ex: resposta.json ou relatorio.pdf"
+                                        value={step.output_file || ''}
+                                        onChange={e => updateStepField(index, 'output_file', e.target.value)}
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div style={{ background: 'rgba(0, 0, 0, 0.25)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '6px', padding: '12px' }}>
+                                    <div style={{ fontSize: '11px', fontWeight: 600, color: '#22d3ee', marginBottom: '8px' }}>
+                                      Variáveis Salvas Automaticamente:
+                                    </div>
+                                    <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                                      <li>
+                                        <code>vars.{step.response_var || 'resposta_http'}</code>: Objeto JSON parseado (ou string bruta).
+                                      </li>
+                                      <li>
+                                        <code>vars.{step.response_var || 'resposta_http'}_status</code>: Código de status HTTP (ex: 200, 404).
+                                      </li>
+                                      <li>
+                                        <code>vars.{step.response_var || 'resposta_http'}_ok</code>: Booleano indicando status 2xx (true/false).
+                                      </li>
+                                      <li>
+                                        <code>vars.{step.response_var || 'resposta_http'}_headers</code>: Objeto com headers de retorno.
+                                      </li>
+                                      <li>
+                                        <code>vars.{step.response_var || 'resposta_http'}_raw</code>: Corpo original como texto simples.
+                                      </li>
+                                    </ul>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>

@@ -148,37 +148,60 @@ export function castVariableValue(val, type = 'text') {
 }
 
 /**
- * Replace secret, parameter and execution variable references in text
+ * Helper to get nested value from object using dot notation path (e.g. "api.user.id")
+ */
+export function getNestedValue(obj, path) {
+  if (!obj || typeof obj !== 'object' || !path) return undefined;
+  if (obj[path] !== undefined) return obj[path];
+  const parts = String(path).split('.');
+  let current = obj;
+  for (const part of parts) {
+    if (current === null || current === undefined || typeof current !== 'object') {
+      return undefined;
+    }
+    current = current[part];
+  }
+  return current;
+}
+
+/**
+ * Replace secret, parameter and execution variable references in text (supports dot notation like {{resposta.token}})
  */
 export function resolveText(text, decryptedSecrets = {}, mergedParams = {}, executionVars = {}) {
   if (typeof text !== 'string') return text;
   
   // 1. Resolve {{var:key}} or {{executionVar:key}} or {{vars.key}} from executionVars
   let resolved = text.replace(/\{\{(?:var:|executionVar:|vars\.)([^}]+)\}\}/g, (match, key) => {
-    if (executionVars[key] !== undefined) {
-      return typeof executionVars[key] === 'object' ? JSON.stringify(executionVars[key]) : String(executionVars[key]);
+    const trimmedKey = key.trim();
+    const val = getNestedValue(executionVars, trimmedKey);
+    if (val !== undefined) {
+      return typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val);
     }
     return match;
   });
 
   // 2. Resolve {{param:key}} or direct {{key}} from mergedParams, executionVars & decryptedSecrets
   resolved = resolved.replace(/\{\{(?:param:)?([^}]+)\}\}/g, (match, key) => {
-    if (mergedParams[key] !== undefined) {
-      return typeof mergedParams[key] === 'object' ? JSON.stringify(mergedParams[key]) : String(mergedParams[key]);
+    const trimmedKey = key.trim();
+    const pVal = getNestedValue(mergedParams, trimmedKey);
+    if (pVal !== undefined) {
+      return typeof pVal === 'object' && pVal !== null ? JSON.stringify(pVal) : String(pVal);
     }
-    if (executionVars[key] !== undefined) {
-      return typeof executionVars[key] === 'object' ? JSON.stringify(executionVars[key]) : String(executionVars[key]);
+    const eVal = getNestedValue(executionVars, trimmedKey);
+    if (eVal !== undefined) {
+      return typeof eVal === 'object' && eVal !== null ? JSON.stringify(eVal) : String(eVal);
     }
-    if (decryptedSecrets[key] !== undefined && decryptedSecrets[key] !== '') {
-      return decryptedSecrets[key];
+    if (decryptedSecrets[trimmedKey] !== undefined && decryptedSecrets[trimmedKey] !== '') {
+      return decryptedSecrets[trimmedKey];
     }
     return match;
   });
 
   // 3. Resolve explicit {{secret:key}} from decryptedSecrets
   resolved = resolved.replace(/\{\{secret:([^}]+)\}\}/g, (match, key) => {
-    if (decryptedSecrets[key] !== undefined && decryptedSecrets[key] !== '') {
-      return decryptedSecrets[key];
+    const trimmedKey = key.trim();
+    if (decryptedSecrets[trimmedKey] !== undefined && decryptedSecrets[trimmedKey] !== '') {
+      return decryptedSecrets[trimmedKey];
     }
     return match;
   });
@@ -196,9 +219,23 @@ function maskParameters(step) {
     return val.replace(/\{\{secret:([^}]+)\}\}/g, '●●●●●●');
   };
 
-  const fieldsToMask = ['url', 'text', 'selector', 'selector_exists', 'query_selector', 'key'];
+  const fieldsToMask = ['url', 'text', 'selector', 'selector_exists', 'query_selector', 'key', 'body', 'payload'];
   for (const field of fieldsToMask) {
     if (masked[field]) masked[field] = mask(masked[field]);
+  }
+  if (Array.isArray(masked.headers)) {
+    masked.headers = masked.headers.map(h => ({
+      ...h,
+      key: mask(h.key),
+      value: mask(h.value)
+    }));
+  }
+  if (Array.isArray(masked.queryParams)) {
+    masked.queryParams = masked.queryParams.map(q => ({
+      ...q,
+      key: mask(q.key),
+      value: mask(q.value)
+    }));
   }
   return masked;
 }
@@ -946,6 +983,209 @@ export async function runTask(
                   stepLog.data.fileSize = Buffer.byteLength(fileContent, 'utf-8');
                 }
               }
+              break;
+            }
+
+            case 'http_request': {
+              const method = (step.method || 'GET').toUpperCase();
+              let rawUrl = resolveText(step.url || '', decryptedSecrets, mergedParams, executionVars).trim();
+              if (!rawUrl) throw new Error('A requisição HTTP requer uma URL válida');
+              if (!/^https?:\/\//i.test(rawUrl)) {
+                rawUrl = 'https://' + rawUrl;
+              }
+
+              // Build URL with Query Params
+              let urlObj;
+              try {
+                urlObj = new URL(rawUrl);
+              } catch (urlErr) {
+                throw new Error(`URL inválida para requisição HTTP: "${rawUrl}" (${urlErr.message})`);
+              }
+
+              if (Array.isArray(step.queryParams)) {
+                for (const q of step.queryParams) {
+                  if (q.enabled === false) continue;
+                  const qKey = resolveText(q.key || '', decryptedSecrets, mergedParams, executionVars).trim();
+                  const qVal = resolveText(q.value !== undefined ? String(q.value) : '', decryptedSecrets, mergedParams, executionVars);
+                  if (qKey) {
+                    urlObj.searchParams.append(qKey, qVal);
+                  }
+                }
+              } else if (step.queryParams && typeof step.queryParams === 'object') {
+                for (const [k, v] of Object.entries(step.queryParams)) {
+                  const qKey = resolveText(k, decryptedSecrets, mergedParams, executionVars).trim();
+                  const qVal = resolveText(String(v), decryptedSecrets, mergedParams, executionVars);
+                  if (qKey) urlObj.searchParams.append(qKey, qVal);
+                }
+              }
+
+              const finalUrl = urlObj.toString();
+
+              // Build Headers
+              const headers = {};
+              if (Array.isArray(step.headers)) {
+                for (const h of step.headers) {
+                  if (h.enabled === false) continue;
+                  const hKey = resolveText(h.key || '', decryptedSecrets, mergedParams, executionVars).trim();
+                  const hVal = resolveText(h.value !== undefined ? String(h.value) : '', decryptedSecrets, mergedParams, executionVars);
+                  if (hKey) {
+                    headers[hKey] = hVal;
+                  }
+                }
+              } else if (step.headers && typeof step.headers === 'object') {
+                for (const [k, v] of Object.entries(step.headers)) {
+                  const hKey = resolveText(k, decryptedSecrets, mergedParams, executionVars).trim();
+                  const hVal = resolveText(String(v), decryptedSecrets, mergedParams, executionVars);
+                  if (hKey) headers[hKey] = hVal;
+                }
+              }
+
+              // Build Payload / Body (for methods that allow bodies)
+              let body = undefined;
+              if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+                const rawBody = step.body !== undefined ? step.body : step.payload;
+                if (rawBody !== undefined && rawBody !== null && rawBody !== '') {
+                  if (typeof rawBody === 'string') {
+                    body = resolveText(rawBody, decryptedSecrets, mergedParams, executionVars);
+                  } else {
+                    body = resolveText(JSON.stringify(rawBody), decryptedSecrets, mergedParams, executionVars);
+                  }
+
+                  // Default Content-Type to application/json if not explicitly provided and body looks like JSON
+                  const hasContentType = Object.keys(headers).some(k => k.toLowerCase() === 'content-type');
+                  if (!hasContentType && typeof body === 'string') {
+                    const trimmed = body.trim();
+                    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                      headers['Content-Type'] = 'application/json';
+                    }
+                  }
+                }
+              }
+
+              const timeoutSec = parseInt(step.timeout, 10) || 30;
+              const timeoutMs = timeoutSec * 1000;
+
+              console.log(`[HTTP Request] ${method} ${finalUrl} (timeout: ${timeoutSec}s)...`);
+
+              const controller = new AbortController();
+              const timer = setTimeout(() => controller.abort(), timeoutMs);
+              const startTime = Date.now();
+              let response;
+              let responseHeaders = {};
+              let rawResponseText = '';
+              let responseData;
+
+              try {
+                response = await fetch(finalUrl, {
+                  method,
+                  headers,
+                  body,
+                  signal: controller.signal
+                });
+              } catch (fetchErr) {
+                clearTimeout(timer);
+                if (controller.signal.aborted) {
+                  throw new Error(`Tempo limite da requisição HTTP (${timeoutSec}s) excedido para ${finalUrl}`);
+                }
+                throw new Error(`Falha na requisição HTTP (${method} ${finalUrl}): ${fetchErr.message}`);
+              } finally {
+                clearTimeout(timer);
+              }
+
+              const durationMs = Date.now() - startTime;
+
+              // Extract response headers
+              for (const [k, v] of response.headers.entries()) {
+                responseHeaders[k] = v;
+              }
+
+              rawResponseText = await response.text();
+              try {
+                responseData = JSON.parse(rawResponseText);
+              } catch (_) {
+                responseData = rawResponseText;
+              }
+
+              console.log(`[HTTP Request] Response status: ${response.status} ${response.statusText} (${durationMs}ms)`);
+
+              // Save to variables if configured
+              const responseVar = (step.response_var || step.output_var || '').trim();
+              if (responseVar) {
+                executionVars[responseVar] = responseData;
+                executionVars[`${responseVar}_status`] = response.status;
+                executionVars[`${responseVar}_ok`] = response.ok;
+                executionVars[`${responseVar}_headers`] = responseHeaders;
+                executionVars[`${responseVar}_raw`] = rawResponseText;
+
+                mergedParams[responseVar] = responseData;
+                runtimeVars[responseVar] = responseData;
+
+                if (page) {
+                  try {
+                    await page.evaluate((updatedVars) => {
+                      if (!window.executionVars) window.executionVars = {};
+                      Object.assign(window.executionVars, updatedVars);
+                      window.vars = window.executionVars;
+                    }, {
+                      [responseVar]: responseData,
+                      [`${responseVar}_status`]: response.status,
+                      [`${responseVar}_ok`]: response.ok,
+                      [`${responseVar}_headers`]: responseHeaders
+                    });
+                  } catch (_) {}
+                }
+
+                logRecord.executionVars = { ...executionVars };
+              }
+
+              // Optional: Save response to output file
+              let savedFilePath = null;
+              if (step.output_file) {
+                try {
+                  const resolvedFilename = resolveText(step.output_file, decryptedSecrets, mergedParams, executionVars).trim();
+                  if (resolvedFilename) {
+                    const safeFilename = path.basename(resolvedFilename);
+                    const uniqueFilename = `${taskId}_${Date.now()}_${safeFilename}`;
+                    const targetPath = path.join(DOWNLOADS_DIR, uniqueFilename);
+                    const fileContent = typeof responseData === 'object' && responseData !== null
+                      ? JSON.stringify(responseData, null, 2)
+                      : String(rawResponseText);
+                    fs.writeFileSync(targetPath, fileContent, 'utf-8');
+
+                    stepLog.downloadPath = `/downloads/${uniqueFilename}`;
+                    stepLog.downloadName = safeFilename;
+                    savedFilePath = `/downloads/${uniqueFilename}`;
+                    console.log(`[HTTP Request] Response saved to downloads: ${targetPath}`);
+                  }
+                } catch (saveErr) {
+                  console.error(`[HTTP Request] Error saving output file:`, saveErr.message);
+                }
+              }
+
+              // Record stepLog data
+              stepLog.data = {
+                method,
+                url: finalUrl,
+                status: response.status,
+                statusText: response.statusText,
+                ok: response.ok,
+                durationMs,
+                headers: responseHeaders,
+                response: responseData,
+                responseVar: responseVar || null,
+                savedFilePath,
+                message: `HTTP ${method} retornou status ${response.status} (${response.statusText}) em ${durationMs}ms`
+              };
+
+              // Fail if status >= 400 and fail_on_error is true
+              const failOnError = step.fail_on_error !== false;
+              if (failOnError && !response.ok) {
+                const previewErr = typeof responseData === 'object' && responseData !== null
+                  ? JSON.stringify(responseData)
+                  : String(rawResponseText).substring(0, 300);
+                throw new Error(`A requisição HTTP falhou com status ${response.status} (${response.statusText}): ${previewErr}`);
+              }
+
               break;
             }
 

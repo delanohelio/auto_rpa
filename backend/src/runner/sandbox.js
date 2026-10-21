@@ -506,6 +506,160 @@ class SandboxManager {
           break;
         }
 
+        case 'http_request': {
+          const method = (step.method || 'GET').toUpperCase();
+          let rawUrl = resolveText(step.url || '', resolvedSecrets, parameters, this.executionVars).trim();
+          if (!rawUrl) throw new Error('A requisição HTTP requer uma URL válida');
+          if (!/^https?:\/\//i.test(rawUrl)) {
+            rawUrl = 'https://' + rawUrl;
+          }
+
+          let urlObj;
+          try {
+            urlObj = new URL(rawUrl);
+          } catch (urlErr) {
+            throw new Error(`URL inválida para requisição HTTP: "${rawUrl}" (${urlErr.message})`);
+          }
+
+          if (Array.isArray(step.queryParams)) {
+            for (const q of step.queryParams) {
+              if (q.enabled === false) continue;
+              const qKey = resolveText(q.key || '', resolvedSecrets, parameters, this.executionVars).trim();
+              const qVal = resolveText(q.value !== undefined ? String(q.value) : '', resolvedSecrets, parameters, this.executionVars);
+              if (qKey) urlObj.searchParams.append(qKey, qVal);
+            }
+          } else if (step.queryParams && typeof step.queryParams === 'object') {
+            for (const [k, v] of Object.entries(step.queryParams)) {
+              const qKey = resolveText(k, resolvedSecrets, parameters, this.executionVars).trim();
+              const qVal = resolveText(String(v), resolvedSecrets, parameters, this.executionVars);
+              if (qKey) urlObj.searchParams.append(qKey, qVal);
+            }
+          }
+
+          const finalUrl = urlObj.toString();
+          const headers = {};
+          if (Array.isArray(step.headers)) {
+            for (const h of step.headers) {
+              if (h.enabled === false) continue;
+              const hKey = resolveText(h.key || '', resolvedSecrets, parameters, this.executionVars).trim();
+              const hVal = resolveText(h.value !== undefined ? String(h.value) : '', resolvedSecrets, parameters, this.executionVars);
+              if (hKey) headers[hKey] = hVal;
+            }
+          } else if (step.headers && typeof step.headers === 'object') {
+            for (const [k, v] of Object.entries(step.headers)) {
+              const hKey = resolveText(k, resolvedSecrets, parameters, this.executionVars).trim();
+              const hVal = resolveText(String(v), resolvedSecrets, parameters, this.executionVars);
+              if (hKey) headers[hKey] = hVal;
+            }
+          }
+
+          let body = undefined;
+          if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+            const rawBody = step.body !== undefined ? step.body : step.payload;
+            if (rawBody !== undefined && rawBody !== null && rawBody !== '') {
+              if (typeof rawBody === 'string') {
+                body = resolveText(rawBody, resolvedSecrets, parameters, this.executionVars);
+              } else {
+                body = resolveText(JSON.stringify(rawBody), resolvedSecrets, parameters, this.executionVars);
+              }
+              const hasContentType = Object.keys(headers).some(k => k.toLowerCase() === 'content-type');
+              if (!hasContentType && typeof body === 'string') {
+                const trimmed = body.trim();
+                if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                  headers['Content-Type'] = 'application/json';
+                }
+              }
+            }
+          }
+
+          const timeoutSec = parseInt(step.timeout, 10) || 30;
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), timeoutSec * 1000);
+          const startTime = Date.now();
+          let response;
+          let responseHeaders = {};
+          let rawResponseText = '';
+          let responseData;
+
+          try {
+            response = await fetch(finalUrl, { method, headers, body, signal: controller.signal });
+          } catch (fetchErr) {
+            clearTimeout(timer);
+            if (controller.signal.aborted) {
+              throw new Error(`Tempo limite da requisição HTTP (${timeoutSec}s) excedido para ${finalUrl}`);
+            }
+            throw new Error(`Falha na requisição HTTP (${method} ${finalUrl}): ${fetchErr.message}`);
+          } finally {
+            clearTimeout(timer);
+          }
+
+          const durationMs = Date.now() - startTime;
+          for (const [k, v] of response.headers.entries()) {
+            responseHeaders[k] = v;
+          }
+          rawResponseText = await response.text();
+          try {
+            responseData = JSON.parse(rawResponseText);
+          } catch (_) {
+            responseData = rawResponseText;
+          }
+
+          const responseVar = (step.response_var || step.output_var || '').trim();
+          if (responseVar) {
+            this.executionVars[responseVar] = responseData;
+            this.executionVars[`${responseVar}_status`] = response.status;
+            this.executionVars[`${responseVar}_ok`] = response.ok;
+            this.executionVars[`${responseVar}_headers`] = responseHeaders;
+            this.executionVars[`${responseVar}_raw`] = rawResponseText;
+
+            if (executionVars && typeof executionVars === 'object') {
+              Object.assign(executionVars, this.executionVars);
+            }
+
+            if (this.page) {
+              try {
+                await this.page.evaluate((updatedVars) => {
+                  if (!window.executionVars) window.executionVars = {};
+                  Object.assign(window.executionVars, updatedVars);
+                  window.vars = window.executionVars;
+                }, {
+                  [responseVar]: responseData,
+                  [`${responseVar}_status`]: response.status,
+                  [`${responseVar}_ok`]: response.ok,
+                  [`${responseVar}_headers`]: responseHeaders
+                });
+              } catch (_) {}
+            }
+          }
+
+          resultLog.data = {
+            method,
+            url: finalUrl,
+            status: response.status,
+            statusText: response.statusText,
+            ok: response.ok,
+            durationMs,
+            headers: responseHeaders,
+            data: responseData,
+            response: responseData,
+            raw: rawResponseText,
+            responseVar: responseVar || null,
+            savedToVars: responseVar || null,
+            message: `HTTP ${method} retornou status ${response.status} (${response.statusText}) em ${durationMs}ms`
+          };
+          resultLog.message = resultLog.data.message;
+
+          const failOnError = step.fail_on_error !== false;
+          if (failOnError && !response.ok) {
+            const previewErr = typeof responseData === 'object' && responseData !== null
+              ? JSON.stringify(responseData)
+              : String(rawResponseText).substring(0, 300);
+            throw new Error(`A requisição HTTP falhou com status ${response.status} (${response.statusText}): ${previewErr}`);
+          }
+
+          break;
+        }
+
         case 'screenshot': {
           const filename = `sandbox_screenshot_${Date.now()}.png`;
           const filePath = path.join(SCREENSHOTS_DIR, filename);
